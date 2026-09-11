@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% block title %}Server error{% endblock %}
+{% block page_title %}Something went wrong{% endblock %}
+{% block content %}
+<div class="card"><div class="card__body">
+    <div class="empty">
+        <div class="empty__icon">{{ icon('warning', 46) }}</div>
+        <h3>The server hit an error</h3>
+        <p>The failure has been logged. If it keeps happening, check the application log on the edge device.</p>
+        <a class="btn btn--primary" href="{{ url_for('pages.dashboard') }}">Back to the dashboard</a>
+    </div>
+</div></div>
+{% endblock %}

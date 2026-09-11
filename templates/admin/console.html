@@ -1,0 +1,99 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% from 'admin/_shared.html' import admin_context, model_state, metric_tile %}
+
+{% block title %}Developer console{% endblock %}
+{% block page_title %}Developer console{% endblock %}
+{% block page_subtitle %}Model, data and platform internals{% endblock %}
+
+{% block topbar_actions %}
+<button class="btn btn--ghost btn--sm" id="reloadModelBtn">
+    {{ icon('refresh', 15) }}<span>Reload artifacts</span>
+</button>
+{% endblock %}
+
+{% block content %}
+<div class="stack">
+    {{ admin_context() }}
+    {{ model_state(model) }}
+
+    <section class="grid grid--stats">
+        {{ metric_tile('Accounts', stats.users, stats.admins ~ ' admin') }}
+        {{ metric_tile('Tracked items', stats['items'], stats.active_items ~ ' active') }}
+        {{ metric_tile('Predictions logged', stats.predictions,
+                       stats.trained_predictions ~ ' from the trained model') }}
+        {{ metric_tile('Held-out test rows', dataset.test_rows if dataset.available else '--',
+                       dataset.rows_with_images ~ ' with images' if dataset.available else 'split metadata missing') }}
+    </section>
+
+    <div class="grid grid--halves">
+        <section class="card">
+            <div class="card__header">{{ icon('cpu', 18) }}<h2>Estimator in use</h2></div>
+            <div class="card__body">
+                <dl class="kv">
+                    <dt>Active model</dt><dd>{{ model.active_model }}</dd>
+                    <dt>Version</dt><dd>{{ model.active_version }}</dd>
+                    <dt>Kind</dt>
+                    <dd>
+                        {% if model.active_kind == 'trained-model' %}
+                            <span class="pill pill--ok">Trained model</span>
+                        {% else %}
+                            <span class="pill pill--warn">Kinetic baseline</span>
+                        {% endif %}
+                    </dd>
+                    <dt>Uses image</dt><dd>{{ 'Yes' if model.uses_image else 'No' }}</dd>
+                    <dt>Needs gas reading</dt><dd>{{ 'Yes' if model.requires_gas else 'No' }}</dd>
+                </dl>
+                <a class="btn btn--ghost btn--block" style="margin-top:1rem"
+                   href="{{ url_for('admin.model_card') }}">Full model card</a>
+            </div>
+        </section>
+
+        <section class="card">
+            <div class="card__header">{{ icon('activity', 18) }}<h2>Where predictions came from</h2></div>
+            <div class="card__body">
+                <dl class="kv">
+                    <dt>Trained model</dt><dd>{{ stats.trained_predictions }}</dd>
+                    <dt>Kinetic baseline</dt><dd>{{ stats.baseline_predictions }}</dd>
+                    <dt>Live readings stored</dt><dd>{{ stats.readings }}</dd>
+                    <dt>Devices</dt><dd>{{ stats.devices }}</dd>
+                    <dt>Alerts raised</dt><dd>{{ stats.alerts }}</dd>
+                </dl>
+                {% if model.trained_model_available and model.requires_gas %}
+                <div class="banner banner--info" style="margin-top:1rem">
+                    {{ icon('info', 17) }}
+                    <div class="banner__body small">
+                        The trained model needs a <strong>Gas</strong> reading and an item
+                        photograph. The reference BMP280 + SHT31 build has no gas sensor, so
+                        monitoring items fall back to the baseline until an MQ-135 reports.
+                        The playground and evaluation pages supply all three inputs directly.
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </section>
+    </div>
+
+    <section class="card">
+        <div class="card__header">{{ icon('flask', 18) }}<h2>Developer tools</h2></div>
+        <div class="card__body grid grid--halves">
+            <a class="btn btn--ghost" href="{{ url_for('admin.playground') }}">
+                {{ icon('image', 15) }}Inference playground
+            </a>
+            <a class="btn btn--ghost" href="{{ url_for('admin.evaluation') }}">
+                {{ icon('activity', 15) }}Held-out evaluation
+            </a>
+            <a class="btn btn--ghost" href="{{ url_for('admin.users') }}">
+                {{ icon('user', 15) }}Accounts and roles
+            </a>
+            <a class="btn btn--ghost" href="{{ url_for('admin.system') }}">
+                {{ icon('database', 15) }}System and maintenance
+            </a>
+        </div>
+    </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{{ url_for('static', filename='js/admin-console.js') }}"></script>
+{% endblock %}

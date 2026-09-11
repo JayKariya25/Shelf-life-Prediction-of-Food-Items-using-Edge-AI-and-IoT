@@ -1,0 +1,78 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% from 'admin/_shared.html' import admin_context, metric_tile %}
+
+{% block title %}System{% endblock %}
+{% block page_title %}System{% endblock %}
+{% block page_subtitle %}Runtime, storage and maintenance{% endblock %}
+
+{% block content %}
+<div class="stack">
+    {{ admin_context() }}
+
+    <section class="grid grid--stats">
+        {{ metric_tile('Predictions', stats.predictions, 'all time') }}
+        {{ metric_tile('Live readings', stats.readings, 'hardware samples only') }}
+        {{ metric_tile('Alerts', stats.alerts, 'raised') }}
+        {{ metric_tile('Devices', stats.devices, 'registered') }}
+    </section>
+
+    <div class="grid grid--halves">
+        <section class="card">
+            <div class="card__header">{{ icon('cpu', 18) }}<h2>Runtime</h2></div>
+            <div class="card__body">
+                <dl class="kv">
+                    <dt>Environment</dt><dd>{{ runtime.environment }}</dd>
+                    <dt>App version</dt><dd>{{ runtime.app_version }}</dd>
+                    <dt>Python</dt>
+                    <dd>
+                        {{ runtime.python }}
+                        {% if runtime.python.startswith('3.14') and not model.trained_model_available %}
+                        <span class="pill pill--warn">TensorFlow has no 3.14 wheel</span>
+                        {% endif %}
+                    </dd>
+                    <dt>Platform</dt><dd class="tiny">{{ runtime.platform }}</dd>
+                    <dt>Sensor source</dt><dd>{{ runtime.sensor_source }}</dd>
+                    <dt>Server time</dt><dd class="mono tiny">{{ runtime.server_time }}</dd>
+                </dl>
+            </div>
+        </section>
+
+        <section class="card">
+            <div class="card__header">{{ icon('database', 18) }}<h2>Paths</h2></div>
+            <div class="card__body">
+                <dl class="kv">
+                    <dt>Database</dt><dd class="mono tiny">{{ runtime.database_path }}</dd>
+                    <dt>Uploads</dt><dd class="mono tiny">{{ runtime.upload_dir }}</dd>
+                    <dt>Keras model</dt><dd class="mono tiny">{{ runtime.keras_model_path }}</dd>
+                    <dt>Scaler</dt><dd class="mono tiny">{{ runtime.scaler_path }}</dd>
+                    <dt>Model config</dt><dd class="mono tiny">{{ runtime.model_config_path }}</dd>
+                    <dt>Split metadata</dt><dd class="mono tiny">{{ runtime.splits_path }}</dd>
+                    <dt>Image directory</dt><dd class="mono tiny">{{ runtime.image_dir }}</dd>
+                </dl>
+            </div>
+        </section>
+    </div>
+
+    <section class="card">
+        <div class="card__header">{{ icon('trash', 18) }}<h2>Maintenance</h2></div>
+        <div class="card__body">
+            <p class="small muted">
+                Stored readings grow continuously on an edge device. Pruning removes live
+                readings older than the window; items, predictions and alerts are untouched.
+            </p>
+            <div class="row row--tight" style="margin-top:0.9rem">
+                <label class="visually-hidden" for="pruneDays">Retention window in days</label>
+                <input class="input" id="pruneDays" type="number" min="1" max="3650"
+                       value="{{ runtime.retention_days }}" style="width:120px">
+                <button class="btn btn--danger" id="pruneBtn">Prune older readings</button>
+            </div>
+            <div id="pruneResult" class="small muted" style="margin-top:0.7rem"></div>
+        </div>
+    </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{{ url_for('static', filename='js/admin-system.js') }}"></script>
+{% endblock %}

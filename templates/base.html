@@ -1,0 +1,158 @@
+{% from '_icons.html' import icon %}<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <meta name="color-scheme" content="light dark">
+    <meta name="description" content="Edge-AI freshness and shelf-life monitoring for fruit and vegetables.">
+    <title>{% block title %}Dashboard{% endblock %} &middot; Shelf-Life Monitor</title>
+    <link rel="icon" href="{{ url_for('static', filename='img/favicon.svg') }}" type="image/svg+xml">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    {# Applies the saved theme before first paint so there is no light flash. #}
+    <script src="{{ url_for('static', filename='js/theme-boot.js') }}"></script>
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<div class="shell">
+    <nav class="sidebar" id="sidebar" aria-label="Primary">
+        <div class="sidebar__brand">
+            <span class="sidebar__logo" aria-hidden="true">SL</span>
+            <span class="sidebar__title">
+                <strong>Shelf-Life Monitor</strong>
+                <span>Edge-AI &middot; PES University</span>
+            </span>
+        </div>
+
+        <div class="sidebar__nav">
+            <div class="sidebar__section">Monitoring</div>
+            <a class="nav-link {{ 'is-active' if request.endpoint == 'pages.dashboard' }}"
+               href="{{ url_for('pages.dashboard') }}">
+                {{ icon('grid', 19) }}<span>Dashboard</span>
+            </a>
+            <a class="nav-link {{ 'is-active' if request.endpoint in ('pages.items', 'pages.item_detail') }}"
+               href="{{ url_for('pages.items') }}">
+                {{ icon('box', 19) }}<span>Items</span>
+            </a>
+            <a class="nav-link {{ 'is-active' if request.endpoint == 'pages.alerts' }}"
+               href="{{ url_for('pages.alerts') }}">
+                {{ icon('bell', 19) }}<span>Alerts</span>
+                <span class="nav-link__badge" id="alertBadge"
+                      {{ 'hidden' if not open_alert_count }}>{{ '9+' if open_alert_count > 9 else open_alert_count }}</span>
+            </a>
+
+            <div class="sidebar__section">System</div>
+            <a class="nav-link {{ 'is-active' if request.endpoint == 'pages.device' }}"
+               href="{{ url_for('pages.device') }}">
+                {{ icon('cpu', 19) }}<span>Device &amp; Model</span>
+            </a>
+            <a class="nav-link {{ 'is-active' if request.endpoint == 'pages.profile' }}"
+               href="{{ url_for('pages.profile') }}">
+                {{ icon('user', 19) }}<span>Profile</span>
+            </a>
+
+            {% if is_admin %}
+            <div class="sidebar__section sidebar__section--admin">
+                Developer {{ icon('shield', 11) }}
+            </div>
+            <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.console' }}"
+               href="{{ url_for('admin.console') }}">
+                {{ icon('grid', 19) }}<span>Console</span>
+            </a>
+            <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.model_card' }}"
+               href="{{ url_for('admin.model_card') }}">
+                {{ icon('cpu', 19) }}<span>Model card</span>
+            </a>
+            <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.playground' }}"
+               href="{{ url_for('admin.playground') }}">
+                {{ icon('flask', 19) }}<span>Playground</span>
+            </a>
+            <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.evaluation' }}"
+               href="{{ url_for('admin.evaluation') }}">
+                {{ icon('activity', 19) }}<span>Evaluation</span>
+            </a>
+            <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.users' }}"
+               href="{{ url_for('admin.users') }}">
+                {{ icon('user', 19) }}<span>Accounts</span>
+            </a>
+            <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.system' }}"
+               href="{{ url_for('admin.system') }}">
+                {{ icon('database', 19) }}<span>System</span>
+            </a>
+            {% endif %}
+        </div>
+
+        <div class="sidebar__footer">
+            <div class="theme-picker">
+                <label class="visually-hidden" for="themeSelect">Appearance</label>
+                <span class="theme-picker__icon" id="themeIcon">{{ icon('moon', 19) }}</span>
+                <select class="select theme-picker__select sidebar__label" id="themeSelect">
+                    <option value="system">System setting</option>
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                </select>
+            </div>
+            <form method="post" action="{{ url_for('auth.logout') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="nav-link">
+                    {{ icon('logout', 19) }}<span class="sidebar__label">Sign out</span>
+                </button>
+            </form>
+        </div>
+    </nav>
+
+    <div class="scrim" id="scrim"></div>
+
+    <div class="main">
+        <header class="topbar">
+            <button type="button" class="btn btn--ghost btn--icon sidebar__mobile-only"
+                    data-sidebar-toggle aria-label="Toggle navigation">
+                {{ icon('menu', 18) }}
+            </button>
+            <button type="button" class="btn btn--ghost btn--icon" data-sidebar-toggle
+                    aria-label="Collapse navigation" style="display:none">
+                {{ icon('menu', 18) }}
+            </button>
+            <div>
+                <div class="topbar__title">{% block page_title %}Dashboard{% endblock %}</div>
+                <div class="topbar__sub">{% block page_subtitle %}{% endblock %}</div>
+            </div>
+            <div class="topbar__spacer"></div>
+            <div class="topbar__actions">
+                {% if is_admin %}
+                <span class="pill pill--info" title="This account can reach both interfaces">
+                    {{ icon('shield', 12) }}Admin
+                </span>
+                {% endif %}
+                {% block topbar_actions %}{% endblock %}
+            </div>
+        </header>
+
+        <main class="page {% block page_class %}{% endblock %}" id="main-content">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                <div class="flash-stack">
+                    {% for category, message in messages %}
+                    {% set tone = {'danger': 'crit', 'success': 'ok', 'warning': 'warn', 'info': 'info'}.get(category, 'info') %}
+                    <div class="banner banner--{{ tone }} flash" role="alert">
+                        {{ icon({'crit': 'warning', 'ok': 'check-circle', 'warn': 'warning'}.get(tone, 'info'), 18) }}
+                        <div class="banner__body">{{ message }}</div>
+                        <button type="button" class="flash__close" aria-label="Dismiss">{{ icon('x', 15) }}</button>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            {% endwith %}
+
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+</div>
+
+{% block modals %}{% endblock %}
+
+<script type="module" src="{{ url_for('static', filename='js/core.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

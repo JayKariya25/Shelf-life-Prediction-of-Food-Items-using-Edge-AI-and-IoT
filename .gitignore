@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Application data - never commit real user data or secrets
+database.db
+database.db-wal
+database.db-shm
+database.db.backup-*
+instance/
+static/uploads/*
+!static/uploads/.gitkeep
+.env
+
+# Trained models and datasets are large binaries; distribute them out of band
+models/*.tflite
+models/*.onnx
+models/*.h5
+models/*.keras
+artifacts/
+data/
+!models/README.md
+
+# Second virtualenv holding the TensorFlow runtime (Python 3.12)
+.venv-model/
+
+# OS / editor
+.DS_Store
+.vscode/*
+!.vscode/settings.json
+.idea/

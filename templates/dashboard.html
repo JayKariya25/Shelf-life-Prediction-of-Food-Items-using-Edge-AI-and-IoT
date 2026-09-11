@@ -1,0 +1,205 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% from '_components.html' import item_card, sensor_pill, model_banner, empty_state, item_form_fields %}
+
+{% block title %}Dashboard{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+{% block page_subtitle %}Live storage conditions and shelf-life estimates{% endblock %}
+
+{% block topbar_actions %}
+    <span id="sensorPill">{{ sensor_pill(snapshot.sensor_mode) }}</span>
+    <button class="btn btn--ghost btn--sm" id="refreshBtn" title="Recompute every estimate now">
+        {{ icon('refresh', 15) }}<span>Refresh</span>
+    </button>
+    <button class="btn btn--primary btn--sm" data-modal-open="addItemModal">
+        {{ icon('plus', 15) }}<span>Add item</span>
+    </button>
+{% endblock %}
+
+{% block content %}
+<div class="stack">
+
+    {{ model_banner(snapshot.model) }}
+
+    {# --- environment tiles ------------------------------------------------- #}
+    <section class="grid grid--stats" aria-label="Current storage environment">
+        <div class="stat">
+            <div class="stat__label">{{ icon('thermometer', 14) }}Temperature</div>
+            <div class="stat__value" id="tempValue">
+                {% if snapshot.reading.temperature_c is not none %}{{ '%.1f' % snapshot.reading.temperature_c }}<small>&deg;C</small>{% else %}--{% endif %}
+            </div>
+            <div class="stat__spark" id="tempSpark"></div>
+            <div class="stat__meta" id="tempMeta">
+                {% if snapshot.reading.recorded_at %}Updated <span data-relative="{{ snapshot.reading.recorded_at }}"></span>{% else %}No reading{% endif %}
+            </div>
+        </div>
+
+        <div class="stat">
+            <div class="stat__label">{{ icon('droplet', 14) }}Relative humidity</div>
+            <div class="stat__value" id="humidityValue">
+                {% if snapshot.reading.humidity_pct is not none %}{{ '%.0f' % snapshot.reading.humidity_pct }}<small>%</small>{% else %}--{% endif %}
+            </div>
+            <div class="stat__spark" id="humiditySpark"></div>
+            <div class="stat__meta" id="humidityMeta">SHT31 sensor</div>
+        </div>
+
+        <div class="stat">
+            <div class="stat__label">{{ icon('box', 14) }}Tracked items</div>
+            <div class="stat__value" id="itemCount">{{ snapshot['items'] | length }}</div>
+            <div class="stat__meta" id="itemCountMeta">
+                <span class="text-crit">{{ snapshot.counts.critical }} urgent</span> &middot;
+                <span class="text-warn">{{ snapshot.counts.warning }} soon</span> &middot;
+                <span class="text-ok">{{ snapshot.counts.ok }} fine</span>
+            </div>
+        </div>
+    </section>
+
+    <div class="grid grid--split">
+        {# --- left column --------------------------------------------------- #}
+        <div class="stack">
+            <section class="card">
+                <div class="card__header">
+                    <h2>Environment trend</h2>
+                    <div class="btn-group" role="group" aria-label="Chart range">
+                        <button class="btn btn--sm is-active" data-range="6">6h</button>
+                        <button class="btn btn--sm" data-range="24">24h</button>
+                        <button class="btn btn--sm" data-range="168">7d</button>
+                    </div>
+                </div>
+                <div class="card__body">
+                    <div class="chart" id="envChart" style="min-height:210px"></div>
+                    <div class="chart-legend" style="margin-top:0.75rem">
+                        <span class="chart-legend__key">
+                            <span class="chart-legend__swatch" style="background:#ef6820"></span>Temperature &deg;C (left axis)
+                        </span>
+                        <span class="chart-legend__key">
+                            <span class="chart-legend__swatch" style="background:#0ba5ec"></span>Relative humidity % (right axis)
+                        </span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card">
+                <div class="card__header">
+                    <h2>Tracked items</h2>
+                    <a class="btn btn--ghost btn--sm" href="{{ url_for('pages.items') }}">
+                        View all {{ icon('chevron-right', 14) }}
+                    </a>
+                </div>
+                <div class="card__body">
+                    {% if snapshot['items'] %}
+                    <div class="grid grid--cards" id="itemGrid">
+                        {% for item in snapshot['items'] %}{{ item_card(item) }}{% endfor %}
+                    </div>
+                    {% else %}
+                    {{ empty_state(
+                        'Nothing being tracked yet',
+                        'Add the fruit or vegetables you are storing and the system will start
+                         estimating how long each one has left under the current conditions.',
+                        'Add your first item', 'data-modal-open="addItemModal"') }}
+                    {% endif %}
+                </div>
+            </section>
+        </div>
+
+        {# --- right column -------------------------------------------------- #}
+        <div class="stack">
+            <section class="card">
+                <div class="card__header">
+                    <h2>Needs attention</h2>
+                    <span class="pill pill--muted" id="atRiskCount">{{ snapshot.at_risk | length }}</span>
+                </div>
+                <div id="atRiskList">
+                    {% if snapshot.at_risk %}
+                        {% for item in snapshot.at_risk %}
+                        {% set tone = 'crit' if item.alert_level == 'critical' else 'warn' %}
+                        <div class="alert-row">
+                            <div class="alert-row__icon alert-row__icon--{{ 'crit' if tone == 'crit' else 'warning' }}">
+                                {{ icon('warning', 16) }}
+                            </div>
+                            <div class="alert-row__body">
+                                <div class="alert-row__title">{{ item.food_emoji }} {{ item.label }}</div>
+                                <div class="alert-row__msg">
+                                    {{ item.remaining_display }} &middot; {{ item.freshness_class }}
+                                </div>
+                            </div>
+                            <a class="btn btn--subtle btn--sm" href="{{ url_for('pages.item_detail', item_id=item.id) }}">Open</a>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="card__body">
+                            <div class="row row--tight text-ok">
+                                {{ icon('check-circle', 17) }}
+                                <span class="small">Everything is comfortably within its estimated shelf life.</span>
+                            </div>
+                        </div>
+                    {% endif %}
+                </div>
+            </section>
+
+            <section class="card">
+                <div class="card__header"><h2>Freshness mix</h2></div>
+                <div class="card__body">
+                    <div id="freshnessBar"></div>
+                </div>
+            </section>
+
+            <section class="card">
+                <div class="card__header"><h2>Storage conditions</h2></div>
+                <div class="card__body">
+                    <div id="conditionList" class="stack" style="gap:0.6rem">
+                        <p class="small muted">Checking each item against its ideal storage band&hellip;</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card">
+                <div class="card__header"><h2>Edge node</h2></div>
+                <div class="card__body">
+                    <dl class="kv">
+                        <dt>Estimator</dt>
+                        <dd>{{ snapshot.model.active_model }}</dd>
+                        <dt>Kind</dt>
+                        <dd>{{ 'Trained model' if snapshot.model.active_kind == 'trained-model' else 'Kinetic baseline' }}</dd>
+                        <dt>Uses image</dt>
+                        <dd>{{ 'Yes' if snapshot.model.uses_image else 'No' }}</dd>
+                        <dt>Sensor source</dt>
+                        <dd id="sensorModeText">{{ snapshot.sensor_mode | capitalize }}</dd>
+                        <dt>Live readings</dt>
+                        <dd>{{ snapshot.live_readings_stored }}</dd>
+                    </dl>
+                    <a class="btn btn--ghost btn--sm btn--block" style="margin-top:0.9rem"
+                       href="{{ url_for('pages.device') }}">{{ icon('cpu', 15) }}Device &amp; model details</a>
+                </div>
+            </section>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block modals %}
+<div class="modal" id="addItemModal" role="dialog" aria-modal="true" aria-labelledby="addItemTitle" aria-hidden="true">
+    <div class="modal__panel modal__panel--wide">
+        <div class="modal__header">
+            <h2 id="addItemTitle">Track a new item</h2>
+            <button class="btn btn--ghost btn--icon" data-modal-close aria-label="Close">{{ icon('x', 16) }}</button>
+        </div>
+        <form id="addItemForm">
+            <div class="modal__body">
+                {{ item_form_fields(food_types, storage_locations, 'add-') }}
+            </div>
+            <div class="modal__footer">
+                <button type="button" class="btn btn--ghost" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn--primary" id="addItemSubmit">
+                    {{ icon('plus', 15) }}Start tracking
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script id="snapshotData" type="application/json">{{ snapshot | tojson }}</script>
+<script type="module" src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}

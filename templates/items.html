@@ -1,0 +1,76 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% from '_components.html' import item_card, empty_state, item_form_fields %}
+
+{% block title %}Items{% endblock %}
+{% block page_title %}Tracked items{% endblock %}
+{% block page_subtitle %}Everything you are monitoring, with its current estimate{% endblock %}
+
+{% block topbar_actions %}
+    <button class="btn btn--primary btn--sm" data-modal-open="addItemModal">
+        {{ icon('plus', 15) }}<span>Add item</span>
+    </button>
+{% endblock %}
+
+{% block content %}
+<div class="stack">
+    <div class="row row--between">
+        <div class="btn-group" role="group" aria-label="Filter by status">
+            {% for key, label in [('active', 'Active'), ('consumed', 'Consumed'), ('discarded', 'Discarded'), ('all', 'All')] %}
+            <a class="btn btn--sm {{ 'is-active' if status == key }}"
+               href="{{ url_for('pages.items', status=key) }}">{{ label }}</a>
+            {% endfor %}
+        </div>
+        <div class="row row--tight">
+            <label class="visually-hidden" for="itemSearch">Search items</label>
+            <input class="input" id="itemSearch" type="search" placeholder="Search items&hellip;"
+                   style="width:220px" autocomplete="off">
+            <label class="visually-hidden" for="itemSort">Sort items</label>
+            <select class="select" id="itemSort" style="width:190px">
+                <option value="urgency">Most urgent first</option>
+                <option value="name">Name (A-Z)</option>
+                <option value="stored">Recently stored</option>
+                <option value="remaining">Longest remaining</option>
+            </select>
+        </div>
+    </div>
+
+    {% if items %}
+    <div class="grid grid--cards" id="itemGrid">
+        {% for item in items %}{{ item_card(item) }}{% endfor %}
+    </div>
+    <p class="small muted" id="noMatches" hidden>No items match that search.</p>
+    {% else %}
+    <div class="card"><div class="card__body">
+        {{ empty_state(
+            'No ' ~ (status if status != 'all' else '') ~ ' items',
+            'Add a fruit or vegetable to start tracking how its shelf life changes with
+             the temperature and humidity it is actually stored in.',
+            'Add an item', 'data-modal-open="addItemModal"') }}
+    </div></div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block modals %}
+<div class="modal" id="addItemModal" role="dialog" aria-modal="true" aria-labelledby="addItemTitle" aria-hidden="true">
+    <div class="modal__panel modal__panel--wide">
+        <div class="modal__header">
+            <h2 id="addItemTitle">Track a new item</h2>
+            <button class="btn btn--ghost btn--icon" data-modal-close aria-label="Close">{{ icon('x', 16) }}</button>
+        </div>
+        <form id="addItemForm">
+            <div class="modal__body">{{ item_form_fields(food_types, storage_locations, 'add-') }}</div>
+            <div class="modal__footer">
+                <button type="button" class="btn btn--ghost" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn--primary">{{ icon('plus', 15) }}Start tracking</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script id="itemsData" type="application/json">{{ items | tojson }}</script>
+<script type="module" src="{{ url_for('static', filename='js/items.js') }}"></script>
+{% endblock %}

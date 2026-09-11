@@ -1,0 +1,59 @@
+{% extends '_auth_shell.html' %}
+{% block title %}Create account{% endblock %}
+
+{% block form %}
+<h2>Create your account</h2>
+<p>Register with an email address, a mobile number, or both.</p>
+
+<form method="post" id="registerForm" novalidate>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="field">
+        <label class="field__label" for="full_name">Name <span class="muted">(optional)</span></label>
+        <input class="input" id="full_name" name="full_name" type="text"
+               value="{{ form.full_name }}" autocomplete="name" maxlength="80">
+    </div>
+
+    <div class="field-row">
+        <div class="field">
+            <label class="field__label" for="email">Email address</label>
+            <input class="input" id="email" name="email" type="email"
+                   value="{{ form.email }}" autocomplete="email" placeholder="you@example.com">
+        </div>
+        <div class="field">
+            <label class="field__label" for="mobile">Mobile number</label>
+            <input class="input" id="mobile" name="mobile" type="tel"
+                   value="{{ form.mobile }}" autocomplete="tel" placeholder="9876543210">
+        </div>
+    </div>
+    <p class="field__hint" style="margin:-0.4rem 0 0.9rem">Provide at least one of the two &mdash; it is how you sign in.</p>
+
+    <div class="field-row">
+        <div class="field">
+            <label class="field__label" for="password">Password</label>
+            <input class="input" id="password" name="password" type="password"
+                   autocomplete="new-password" minlength="8" required>
+        </div>
+        <div class="field">
+            <label class="field__label" for="confirm_password">Confirm password</label>
+            <input class="input" id="confirm_password" name="confirm_password" type="password"
+                   autocomplete="new-password" minlength="8" required>
+        </div>
+    </div>
+
+    <div class="field">
+        <div class="meter" style="height:5px"><div class="meter__fill meter__fill--muted" id="strengthBar" style="width:0"></div></div>
+        <span class="field__hint" id="strengthText">At least 8 characters.</span>
+    </div>
+
+    <button class="btn btn--primary btn--block" type="submit">Create account</button>
+</form>
+
+<div class="auth__switch">
+    Already registered? <a href="{{ url_for('auth.login') }}">Sign in</a>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{{ url_for('static', filename='js/register.js') }}"></script>
+{% endblock %}

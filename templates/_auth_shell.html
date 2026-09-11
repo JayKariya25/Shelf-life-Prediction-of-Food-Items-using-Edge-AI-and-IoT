@@ -1,0 +1,66 @@
+{% from '_icons.html' import icon %}<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <meta name="color-scheme" content="light dark">
+    <title>{% block title %}Sign in{% endblock %} &middot; Shelf-Life Monitor</title>
+    <link rel="icon" href="{{ url_for('static', filename='img/favicon.svg') }}" type="image/svg+xml">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    <script src="{{ url_for('static', filename='js/theme-boot.js') }}"></script>
+</head>
+<body>
+<div class="auth">
+    <aside class="auth__aside">
+        <div class="auth__brand">
+            <span class="sidebar__logo" aria-hidden="true">SL</span>
+            <strong>Shelf-Life Monitor</strong>
+        </div>
+
+        <div class="auth__pitch">
+            <h1>Know how long your produce really has.</h1>
+            <p>
+                A Raspberry Pi watches temperature and humidity where your fruit and
+                vegetables are stored, and estimates how much shelf life each item has
+                left &mdash; on the device, with no cloud round trip.
+            </p>
+            <ul class="auth__points">
+                <li>{{ icon('thermometer', 18) }}<span>BMP280 and SHT31 sensing, sampled continuously</span></li>
+                <li>{{ icon('cpu', 18) }}<span>Inference runs locally on the Raspberry Pi 5</span></li>
+                <li>{{ icon('activity', 18) }}<span>Degradation integrated over the conditions actually experienced</span></li>
+                <li>{{ icon('bell', 18) }}<span>Alerts before produce is wasted, not after</span></li>
+            </ul>
+        </div>
+
+        <div class="auth__foot">
+            B.Tech Capstone Project &middot; PES University, Bengaluru
+        </div>
+    </aside>
+
+    <section class="auth__panel">
+        <div class="auth__form">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                <div class="flash-stack">
+                    {% for category, message in messages %}
+                    {% set tone = {'danger': 'crit', 'success': 'ok', 'warning': 'warn', 'info': 'info'}.get(category, 'info') %}
+                    <div class="banner banner--{{ tone }} flash" role="alert">
+                        {{ icon({'crit': 'warning', 'ok': 'check-circle', 'warn': 'warning'}.get(tone, 'info'), 18) }}
+                        <div class="banner__body">{{ message }}</div>
+                        <button type="button" class="flash__close" aria-label="Dismiss">{{ icon('x', 15) }}</button>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            {% endwith %}
+
+            {% block form %}{% endblock %}
+        </div>
+    </section>
+</div>
+
+<script type="module" src="{{ url_for('static', filename='js/core.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

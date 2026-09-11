@@ -1,0 +1,24 @@
+# --- web application ---------------------------------------------------------
+# Runs on any Python 3.10+. This is all you need for the monitoring interface
+# with the Q10 kinetic baseline.
+Flask>=3.0,<4.0
+
+# --- trained multimodal model (optional) -------------------------------------
+# Needed only to serve models/best_multimodal_model.keras.
+#
+#   IMPORTANT: TensorFlow publishes no wheel for Python 3.14. Create a separate
+#   environment on Python 3.12 and install requirements-model.txt there:
+#
+#       python3.12 -m venv .venv-model
+#       .venv-model/bin/pip install -r requirements-model.txt
+#       .venv-model/bin/python app.py
+#
+# See requirements-model.txt.
+
+# --- Raspberry Pi (optional) -------------------------------------------------
+# Sensor drivers for tools/pi_agent.py:
+#   adafruit-circuitpython-bmp280
+#   adafruit-circuitpython-sht31d
+#
+# Production WSGI server (do not use Flask's dev server on the Pi):
+#   waitress

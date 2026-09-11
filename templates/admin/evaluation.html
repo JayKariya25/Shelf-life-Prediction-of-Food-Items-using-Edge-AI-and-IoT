@@ -1,0 +1,79 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% from 'admin/_shared.html' import admin_context, model_state %}
+
+{% block title %}Held-out evaluation{% endblock %}
+{% block page_title %}Held-out evaluation{% endblock %}
+{% block page_subtitle %}Samples the model was never fitted on{% endblock %}
+
+{% block content %}
+<div class="stack">
+    {{ admin_context() }}
+    {{ model_state(model) }}
+
+    {% if not dataset.available %}
+    <section class="card"><div class="card__body">
+        <div class="empty">
+            <div class="empty__icon">{{ icon('inbox', 46) }}</div>
+            <h3>No held-out split available</h3>
+            <p>{{ dataset.error }}</p>
+            <p class="small mono">{{ dataset.splits_path }}</p>
+        </div>
+    </div></section>
+    {% else %}
+
+    <section class="card">
+        <div class="card__header">
+            {{ icon('activity', 18) }}<h2>Aggregate metrics</h2>
+            <div class="row row--tight">
+                <label class="visually-hidden" for="evalLimit">Samples to evaluate</label>
+                <input class="input" id="evalLimit" type="number" min="1"
+                       max="{{ [sample_count, max_samples] | min }}"
+                       value="{{ [sample_count, max_samples] | min }}" style="width:110px">
+                <button class="btn btn--primary btn--sm" id="runEvalBtn"
+                        {{ 'disabled' if not model.trained_model_available }}>
+                    {{ icon('cpu', 15) }}Run evaluation
+                </button>
+            </div>
+        </div>
+        <div class="card__body">
+            <p class="small muted">
+                Runs the saved model over the <strong>{{ sample_count }}</strong> rows marked
+                <span class="mono">test</span> in the split metadata and computes the error against
+                the recorded <span class="mono">RemainingShelfLife</span>. Read-only: it does not
+                touch the model, the scaler or the split file.
+            </p>
+            <div id="evalResults" style="margin-top:1rem">
+                <p class="small muted">No evaluation run yet.</p>
+            </div>
+        </div>
+    </section>
+
+    <div class="grid grid--split">
+        <section class="card">
+            <div class="card__header">
+                {{ icon('image', 18) }}<h2>Sample browser</h2>
+                <button class="btn btn--ghost btn--sm" id="randomSampleBtn">Random sample</button>
+            </div>
+            <div class="card__body">
+                <div class="sample-strip" id="sampleStrip">
+                    <p class="small muted">Loading samples&hellip;</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <div class="card__header">{{ icon('flask', 18) }}<h2>Selected sample</h2></div>
+            <div class="card__body" id="sampleDetail">
+                <p class="small muted">Choose a sample to run the model on it.</p>
+            </div>
+        </section>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script id="evalConfig" type="application/json">{{ {'available': dataset.available, 'modelReady': model.trained_model_available, 'count': sample_count} | tojson }}</script>
+<script type="module" src="{{ url_for('static', filename='js/admin-evaluation.js') }}"></script>
+{% endblock %}

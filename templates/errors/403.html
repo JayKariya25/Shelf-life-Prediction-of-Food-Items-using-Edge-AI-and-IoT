@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% block title %}Restricted{% endblock %}
+{% block page_title %}Restricted area{% endblock %}
+{% block content %}
+<div class="card"><div class="card__body">
+    <div class="empty">
+        <div class="empty__icon">{{ icon('shield', 46) }}</div>
+        <h3>Administrators only</h3>
+        <p>
+            The developer console is limited to accounts with the admin role.
+            You are signed in, but this account does not have it.
+        </p>
+        <a class="btn btn--primary" href="{{ url_for('pages.dashboard') }}">Back to the dashboard</a>
+    </div>
+</div></div>
+{% endblock %}

@@ -1,0 +1,178 @@
+{% from '_icons.html' import icon %}
+
+{#- Freshness / urgency pill -#}
+{% macro status_pill(item) %}
+    {%- set tone = {'critical': 'crit', 'warning': 'warn', 'ok': 'ok'}.get(item.alert_level, 'muted') -%}
+    <span class="pill pill--{{ tone }}">
+        <span class="pill__dot{{ ' pill__dot--pulse' if item.alert_level == 'critical' }}"></span>
+        {{ item.freshness_class }}
+    </span>
+{% endmacro %}
+
+{#- Sensor source indicator. Simulated data is always labelled as such. -#}
+{% macro sensor_pill(mode) %}
+    {% if mode == 'live' %}
+        <span class="pill pill--ok" title="A device reported within the online window">
+            <span class="pill__dot pill__dot--pulse"></span>Live sensor
+        </span>
+    {% elif mode == 'offline' %}
+        <span class="pill pill--crit" title="No device has reported recently">
+            <span class="pill__dot"></span>Sensor offline
+        </span>
+    {% else %}
+        <span class="pill pill--warn" title="No hardware connected - values come from the built-in simulator">
+            <span class="pill__dot"></span>Simulated data
+        </span>
+    {% endif %}
+{% endmacro %}
+
+{#- One tracked item -#}
+{% macro item_card(item) %}
+{%- set tone = {'critical': 'crit', 'warning': 'warn', 'ok': 'ok'}.get(item.alert_level, 'muted') -%}
+<article class="item-card item-card--{{ tone }}" data-item-id="{{ item.id }}">
+    <a class="item-card__media" href="{{ url_for('pages.item_detail', item_id=item.id) }}"
+       aria-label="Open {{ item.label }}">
+        {% if item.image_path %}
+            <img src="{{ url_for('static', filename='uploads/' ~ item.image_path) }}"
+                 alt="Photograph of {{ item.label }}" loading="lazy">
+        {% else %}
+            <span class="item-card__emoji" role="img" aria-label="{{ item.food_name }}">{{ item.food_emoji }}</span>
+        {% endif %}
+        <span class="item-card__status">{{ status_pill(item) }}</span>
+    </a>
+
+    <div class="item-card__body">
+        <div class="item-card__title">
+            <h3>{{ item.label }}</h3>
+        </div>
+        <div class="item-card__type">
+            {{ item.food_name }}{% if item.quantity %} &middot; {{ item.quantity }}{% endif %}
+            &middot; {{ item.storage }}
+        </div>
+
+        <div class="item-card__life">
+            <strong data-field="remaining">{{ item.remaining_display }}</strong>
+        </div>
+
+        {% set fraction = 0 %}
+        {% if item.remaining_hours is not none and item.remaining_hours_high %}
+            {% set fraction = (item.remaining_hours / (item.remaining_hours + item.hours_stored + 0.001)) %}
+        {% endif %}
+        <div class="meter" title="Share of modelled shelf life remaining">
+            <div class="meter__fill meter__fill--{{ tone }}" style="width: {{ (fraction * 100) | round(1) }}%"></div>
+        </div>
+
+        {% if item.condition_flags %}
+            <div class="tiny text-warn row row--tight">
+                {{ icon('warning', 13) }}<span>{{ item.condition_flags[0] }}</span>
+            </div>
+        {% endif %}
+        {% if item.environment_source == 'nominal' %}
+            <div class="tiny muted row row--tight" title="{{ item.environment_note }}">
+                {{ icon('info', 12) }}<span>Nominal {{ item.storage }} conditions</span>
+            </div>
+        {% endif %}
+
+        <div class="item-card__foot">
+            <span class="tiny muted">Stored {{ item.days_stored }}d ago</span>
+            <a class="btn btn--subtle btn--sm" style="margin-left:auto"
+               href="{{ url_for('pages.item_detail', item_id=item.id) }}">
+                Details {{ icon('chevron-right', 14) }}
+            </a>
+        </div>
+    </div>
+</article>
+{% endmacro %}
+
+{#- Model provenance. This is deliberately prominent: the app must never imply a
+    trained multimodal model is running when the kinetic baseline is. -#}
+{% macro model_banner(model) %}
+{% if model.active_kind == 'trained-model' %}
+<div class="banner banner--ok">
+    {{ icon('cpu', 18) }}
+    <div class="banner__body">
+        <div class="banner__title">Trained model active</div>
+        Predictions come from <strong>{{ model.active_model }}</strong> v{{ model.active_version }}
+        {% if model.uses_image %}using image plus sensor input{% else %}using sensor input{% endif %}.
+    </div>
+</div>
+{% else %}
+<div class="banner banner--info">
+    {{ icon('flask', 18) }}
+    <div class="banner__body">
+        <div class="banner__title">Baseline estimator active &mdash; not a trained model</div>
+        Estimates come from the <strong>{{ model.active_model }}</strong>, a temperature and
+        humidity kinetic model. It does <strong>not</strong> use the camera image, and it
+        reports no calibrated confidence. Place the trained artifacts in
+        <span class="mono">models/</span> and <span class="mono">artifacts/</span> and the app
+        switches over on its own &mdash; see <span class="mono">models/README.md</span>.
+    </div>
+</div>
+{% endif %}
+{% endmacro %}
+
+{#- Empty state -#}
+{% macro empty_state(title, message, action_label=None, action_attrs='') %}
+<div class="empty">
+    <div class="empty__icon">{{ icon('inbox', 46) }}</div>
+    <h3>{{ title }}</h3>
+    <p>{{ message }}</p>
+    {% if action_label %}<button class="btn btn--primary" {{ action_attrs | safe }}>{{ icon('plus', 16) }}{{ action_label }}</button>{% endif %}
+</div>
+{% endmacro %}
+
+{#- Add / edit item form fields, shared by both modals -#}
+{% macro item_form_fields(food_types, storage_locations, prefix='') %}
+<div class="field">
+    <label class="field__label" for="{{ prefix }}label">Item name</label>
+    <input class="input" id="{{ prefix }}label" name="label" type="text" maxlength="80"
+           placeholder="e.g. Tomatoes from Tuesday market" required>
+</div>
+
+<div class="field-row">
+    <div class="field">
+        <label class="field__label" for="{{ prefix }}food_type_id">Produce type</label>
+        <select class="select" id="{{ prefix }}food_type_id" name="food_type_id" required>
+            {% for food in food_types %}
+            <option value="{{ food.id }}">{{ food.emoji }} {{ food.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="field">
+        <label class="field__label" for="{{ prefix }}quantity">Quantity <span class="muted">(optional)</span></label>
+        <input class="input" id="{{ prefix }}quantity" name="quantity" type="text"
+               maxlength="40" placeholder="500 g">
+    </div>
+</div>
+
+<div class="field-row">
+    <div class="field">
+        <label class="field__label" for="{{ prefix }}storage">Stored in</label>
+        <select class="select" id="{{ prefix }}storage" name="storage">
+            {% for location in storage_locations %}
+            <option value="{{ location }}">{{ location | capitalize }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="field">
+        <label class="field__label" for="{{ prefix }}stored_at">Stored since</label>
+        <input class="input" id="{{ prefix }}stored_at" name="stored_at" type="datetime-local">
+        <span class="field__hint">Defaults to now.</span>
+    </div>
+</div>
+
+<div class="field">
+    <label class="field__label" for="{{ prefix }}image">Photo <span class="muted">(optional)</span></label>
+    <input class="input" id="{{ prefix }}image" name="image" type="file" accept="image/jpeg,image/png,image/webp">
+    <span class="field__hint">
+        Stored alongside the item. The baseline estimator does not read images &mdash;
+        this builds the dataset for the vision model.
+    </span>
+</div>
+
+<div class="field">
+    <label class="field__label" for="{{ prefix }}notes">Notes <span class="muted">(optional)</span></label>
+    <textarea class="textarea" id="{{ prefix }}notes" name="notes" maxlength="500"
+              placeholder="Anything worth recording about this batch"></textarea>
+</div>
+{% endmacro %}

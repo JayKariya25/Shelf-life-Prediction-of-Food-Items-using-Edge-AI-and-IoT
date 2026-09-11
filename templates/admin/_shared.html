@@ -1,0 +1,58 @@
+{% from '_icons.html' import icon %}
+
+{#- Banner shown on every developer page, so it is never ambiguous which
+    interface is on screen. -#}
+{% macro admin_context() %}
+<div class="admin-banner">
+    {{ icon('shield', 15) }}
+    <span><strong>Developer interface.</strong> Not visible to ordinary accounts.
+    Nothing here retrains or modifies the saved model, scaler or split metadata.</span>
+</div>
+{% endmacro %}
+
+{#- Model availability summary reused by several pages. -#}
+{% macro model_state(model) %}
+{% if model.trained_model_available %}
+<div class="banner banner--ok">
+    {{ icon('check-circle', 18) }}
+    <div class="banner__body">
+        <div class="banner__title">Trained model loaded</div>
+        <strong>{{ model.active_model }}</strong> v{{ model.active_version }} &mdash;
+        image + Temperature/Humidity/Gas &rarr; remaining shelf life in days.
+    </div>
+</div>
+{% else %}
+<div class="banner banner--warn">
+    {{ icon('warning', 18) }}
+    <div class="banner__body">
+        <div class="banner__title">Trained model not loaded</div>
+        <p class="small" style="margin:0.2rem 0 0">
+            {{ model.trained_model_error or 'No trained model is configured.' }}
+        </p>
+        <p class="small" style="margin:0.35rem 0 0">
+            The application is serving the <strong>{{ model.baseline_name }}</strong> instead.
+        </p>
+    </div>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro artifact(label, path, present) %}
+<div class="artifact-row">
+    {% if present %}
+        <span class="pill pill--ok">{{ icon('check', 12) }}found</span>
+    {% else %}
+        <span class="pill pill--crit">{{ icon('x', 12) }}missing</span>
+    {% endif %}
+    <span class="strong nowrap">{{ label }}</span>
+    <span class="artifact-row__path">{{ path }}</span>
+</div>
+{% endmacro %}
+
+{% macro metric_tile(label, value, hint='') %}
+<div class="stat">
+    <div class="stat__label">{{ label }}</div>
+    <div class="stat__value">{{ value }}</div>
+    {% if hint %}<div class="stat__meta">{{ hint }}</div>{% endif %}
+</div>
+{% endmacro %}

@@ -1,0 +1,116 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% from '_components.html' import empty_state %}
+
+{% block title %}Alerts{% endblock %}
+{% block page_title %}Alerts &amp; reminders{% endblock %}
+{% block page_subtitle %}When to act, and how you want to be told{% endblock %}
+
+{% block topbar_actions %}
+    <button class="btn btn--ghost btn--sm" id="ackAllBtn">{{ icon('check', 15) }}<span>Mark all read</span></button>
+{% endblock %}
+
+{% block content %}
+<div class="grid grid--split">
+    <section class="card">
+        <div class="card__header">
+            <h2>Alert feed</h2>
+            <div class="btn-group" role="group" aria-label="Filter alerts">
+                <button class="btn btn--sm is-active" data-filter="all">All</button>
+                <button class="btn btn--sm" data-filter="open">Unread</button>
+            </div>
+        </div>
+        <div id="alertFeed">
+            {% if alerts %}
+                {% for alert in alerts %}
+                <div class="alert-row {{ 'is-acknowledged' if alert.acknowledged_at }}"
+                     data-alert-id="{{ alert.id }}"
+                     data-open="{{ '0' if alert.acknowledged_at else '1' }}">
+                    <div class="alert-row__icon alert-row__icon--{{ 'crit' if alert.level == 'critical' else 'warning' if alert.level == 'warning' else 'info' }}">
+                        {{ icon('warning' if alert.level in ('critical', 'warning') else 'info', 16) }}
+                    </div>
+                    <div class="alert-row__body">
+                        <div class="alert-row__title">{{ alert.title }}</div>
+                        <div class="alert-row__msg">{{ alert.message }}</div>
+                        <div class="alert-row__time" style="margin-top:0.2rem">
+                            <span data-relative="{{ alert.created_at }}"></span>
+                            &middot; {{ alert.created_at | localtime }}
+                        </div>
+                    </div>
+                    <div class="row row--tight">
+                        {% if alert.item_id %}
+                        <a class="btn btn--subtle btn--sm" href="{{ url_for('pages.item_detail', item_id=alert.item_id) }}">Open</a>
+                        {% endif %}
+                        {% if not alert.acknowledged_at %}
+                        <button class="btn btn--ghost btn--icon btn--sm" data-ack="{{ alert.id }}"
+                                aria-label="Mark as read" title="Mark as read">{{ icon('check', 14) }}</button>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="card__body">
+                    {{ empty_state('No alerts yet',
+                        'Alerts are raised automatically when a tracked item drops below your
+                         reminder threshold, or when its storage conditions go out of band.') }}
+                </div>
+            {% endif %}
+        </div>
+    </section>
+
+    <div class="stack">
+        <section class="card">
+            <div class="card__header"><h2>Reminder threshold</h2></div>
+            <div class="card__body">
+                <div class="field">
+                    <label class="field__label" for="alertDays">Warn me this many days ahead</label>
+                    <input class="input" id="alertDays" type="number" min="1" max="30"
+                           value="{{ settings.alert_days_before }}">
+                    <span class="field__hint">
+                        An item is flagged <span class="text-warn">use soon</span> below this
+                        threshold, and <span class="text-crit">urgent</span> inside 24 hours.
+                    </span>
+                </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <div class="card__header"><h2>Delivery channels</h2></div>
+            <div class="card__body stack" style="gap:0.9rem">
+                <label class="switch">
+                    <input type="checkbox" id="emailNotify" {{ 'checked' if settings.email_notifications }}>
+                    <span class="switch__track"></span>
+                    <span class="switch__text">
+                        Email
+                        <small>{{ current_user.email or 'No email address on this account' }}</small>
+                    </span>
+                </label>
+
+                <label class="switch">
+                    <input type="checkbox" id="smsNotify" {{ 'checked' if settings.sms_notifications }}>
+                    <span class="switch__track"></span>
+                    <span class="switch__text">
+                        SMS
+                        <small>{{ current_user.mobile or 'No mobile number on this account' }}</small>
+                    </span>
+                </label>
+
+                <div class="banner banner--info">
+                    {{ icon('info', 17) }}
+                    <div class="banner__body small">
+                        These preferences are stored, but no email or SMS gateway is wired up yet.
+                        Alerts currently appear in this feed and on the dashboard only.
+                    </div>
+                </div>
+            </div>
+            <div class="card__footer">
+                <button class="btn btn--primary btn--block" id="saveSettings">Save preferences</button>
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{{ url_for('static', filename='js/alerts.js') }}"></script>
+{% endblock %}

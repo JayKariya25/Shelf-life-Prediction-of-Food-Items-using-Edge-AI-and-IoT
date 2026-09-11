@@ -1,0 +1,82 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% from 'admin/_shared.html' import admin_context %}
+
+{% block title %}Accounts{% endblock %}
+{% block page_title %}Accounts and roles{% endblock %}
+{% block page_subtitle %}Who can reach which interface{% endblock %}
+
+{% block content %}
+<div class="stack">
+    {{ admin_context() }}
+
+    <div class="banner banner--info">
+        {{ icon('info', 18) }}
+        <div class="banner__body small">
+            <strong>user</strong> reaches only the monitoring interface.
+            <strong>admin</strong> reaches that <em>and</em> this developer console.
+            There is one login for both &mdash; the role decides what appears.
+            The last remaining administrator cannot be demoted or deactivated.
+        </div>
+    </div>
+
+    <section class="card">
+        <div class="card__header">{{ icon('user', 18) }}<h2>{{ users | length }} accounts</h2></div>
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>#</th><th>Account</th><th>Role</th><th>Status</th>
+                        <th class="table__num">Items</th><th class="table__num">Devices</th>
+                        <th>Last sign-in</th><th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user in users %}
+                    <tr data-user-id="{{ user.id }}">
+                        <td class="muted">{{ user.id }}</td>
+                        <td>
+                            <div class="strong">{{ user.email or user.mobile or 'unnamed' }}</div>
+                            {% if user.full_name %}<div class="tiny muted">{{ user.full_name }}</div>{% endif %}
+                            {% if user.id == current_user['id'] %}<span class="tag">you</span>{% endif %}
+                        </td>
+                        <td>
+                            <label class="visually-hidden" for="role-{{ user.id }}">Role for account {{ user.id }}</label>
+                            <select class="select" id="role-{{ user.id }}" data-role-select="{{ user.id }}"
+                                    style="width:110px">
+                                {% for role in roles %}
+                                <option value="{{ role }}" {{ 'selected' if user.role == role }}>{{ role }}</option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td>
+                            {% if user.is_active %}
+                                <span class="pill pill--ok">active</span>
+                            {% else %}
+                                <span class="pill pill--muted">disabled</span>
+                            {% endif %}
+                        </td>
+                        <td class="table__num">{{ user.item_count }}</td>
+                        <td class="table__num">{{ user.device_count }}</td>
+                        <td class="muted tiny">
+                            {% if user.last_login_at %}<span data-relative="{{ user.last_login_at }}"></span>
+                            {% else %}never{% endif %}
+                        </td>
+                        <td>
+                            <button class="btn btn--ghost btn--sm" data-toggle-active="{{ user.id }}"
+                                    data-active="{{ '1' if user.is_active else '0' }}">
+                                {{ 'Disable' if user.is_active else 'Enable' }}
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{{ url_for('static', filename='js/admin-users.js') }}"></script>
+{% endblock %}

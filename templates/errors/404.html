@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% block title %}Not found{% endblock %}
+{% block page_title %}Page not found{% endblock %}
+{% block content %}
+<div class="card"><div class="card__body">
+    <div class="empty">
+        <div class="empty__icon">{{ icon('search', 46) }}</div>
+        <h3>Nothing here</h3>
+        <p>That page or item does not exist. It may have been deleted, or the link may be wrong.</p>
+        <a class="btn btn--primary" href="{{ url_for('pages.dashboard') }}">Back to the dashboard</a>
+    </div>
+</div></div>
+{% endblock %}

@@ -1,0 +1,309 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% from '_components.html' import status_pill %}
+
+{% block title %}{{ item.label }}{% endblock %}
+{% block page_title %}{{ item.food_emoji }} {{ item.label }}{% endblock %}
+{% block page_subtitle %}{{ item.food_name }} &middot; stored in the {{ item.storage }} for {{ item.days_stored }} days{% endblock %}
+
+{% block topbar_actions %}
+    <button class="btn btn--ghost btn--sm" id="predictBtn">
+        {{ icon('refresh', 15) }}<span>Re-estimate</span>
+    </button>
+    <button class="btn btn--ghost btn--sm" data-modal-open="editItemModal">
+        {{ icon('edit', 15) }}<span>Edit</span>
+    </button>
+{% endblock %}
+
+{% block content %}
+<div class="stack">
+    <a class="small muted row row--tight" href="{{ url_for('pages.items') }}"
+       style="text-decoration:none;width:max-content">
+        {{ icon('chevron-left', 14) }} Back to items
+    </a>
+
+    <div class="grid grid--split">
+        <div class="stack">
+            {# --- headline estimate ---------------------------------------- #}
+            <section class="card">
+                <div class="card__body">
+                    <div class="row" style="gap:1.5rem;align-items:flex-start">
+                        <div id="lifeGauge" style="flex:0 0 auto"></div>
+
+                        <div style="flex:1;min-width:220px">
+                            <div class="row row--tight" style="margin-bottom:0.4rem">
+                                <span id="freshnessPill">{{ status_pill(item) }}</span>
+                                {% if item.status != 'active' %}
+                                <span class="pill pill--muted">{{ item.status | capitalize }}</span>
+                                {% endif %}
+                            </div>
+
+                            <h2 style="font-size:1.9rem" id="remainingHeadline">
+                                {% if item.remaining_hours is none %}No estimate
+                                {% elif item.remaining_hours <= 0 %}Past its estimate
+                                {% else %}{{ item.remaining_hours | duration }}{% endif %}
+                            </h2>
+                            <p class="muted small" style="margin-top:0.2rem">estimated remaining shelf life</p>
+
+                            {% if item.remaining_hours_low is not none and item.remaining_hours > 0 %}
+                            <p class="small muted" id="rangeLine">
+                                Modelling range {{ item.remaining_hours_low | duration }} &ndash;
+                                {{ item.remaining_hours_high | duration }}
+                                <span class="tag" title="The baseline reports a fixed +/-35% band, which is a stated
+                                       modelling assumption rather than a measured error bar">assumed band</span>
+                            </p>
+                            {% endif %}
+
+                            <p class="small muted row row--tight" style="margin-top:0.5rem">
+                                {{ icon('info', 14) }}
+                                <span>{{ item.environment_note }}</span>
+                            </p>
+
+                            {% if item.condition_flags %}
+                            <div class="stack" style="gap:0.4rem;margin-top:0.9rem">
+                                {% for flag in item.condition_flags %}
+                                <div class="banner banner--warn" style="padding:0.5rem 0.7rem">
+                                    {{ icon('warning', 15) }}<div class="banner__body small">{{ flag }}</div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    {% if prediction and prediction.rationale %}
+                    <hr class="divider">
+                    <div class="small">
+                        <div class="strong row row--tight" style="margin-bottom:0.35rem">
+                            {{ icon('flask', 15) }} How this was calculated
+                        </div>
+                        <p class="muted" id="rationaleText">{{ prediction.rationale }}</p>
+                        <p class="tiny muted" style="margin-top:0.5rem">
+                            {{ prediction.model_name }} v{{ prediction.model_version }}
+                            &middot; {{ '%.1f' % (prediction.inference_ms or 0) }} ms
+                            &middot; {{ 'image + sensors' if prediction.model_kind == 'trained-model' else 'sensors only, image not used' }}
+                            &middot; run <span data-relative="{{ prediction.created_at }}"></span>
+                        </p>
+                    </div>
+                    {% endif %}
+                </div>
+            </section>
+
+            {# --- prediction history --------------------------------------- #}
+            <section class="card">
+                <div class="card__header">
+                    <h2>Estimated shelf life over time</h2>
+                    <span class="pill pill--muted">{{ history | length }} run{{ '' if history | length == 1 else 's' }}</span>
+                </div>
+                <div class="card__body">
+                    <div class="chart" id="historyChart" style="min-height:200px"></div>
+                    <p class="tiny muted" style="margin-top:0.7rem">
+                        Each point is one inference run. A falling line means conditions are
+                        consuming shelf life faster than the clock.
+                    </p>
+                </div>
+            </section>
+
+            {# --- environment ---------------------------------------------- #}
+            <section class="card">
+                <div class="card__header">
+                    <h2>Conditions during storage</h2>
+                    <span class="pill pill--{{ 'ok' if environment.mode == 'live' else 'warn' if environment.mode == 'simulated' else 'crit' }}">
+                        {{ environment.mode | capitalize }}
+                    </span>
+                </div>
+                <div class="card__body">
+                    <div class="chart" id="envChart" style="min-height:190px"></div>
+                    <div class="chart-legend" style="margin-top:0.75rem">
+                        <span class="chart-legend__key">
+                            <span class="chart-legend__swatch" style="background:#ef6820"></span>Temperature &deg;C (left axis)
+                        </span>
+                        <span class="chart-legend__key">
+                            <span class="chart-legend__swatch" style="background:#0ba5ec"></span>Humidity % (right axis)
+                        </span>
+                        {% if item.ideal_temp_min_c is not none %}
+                        <span class="chart-legend__key">
+                            Ideal band: {{ item.ideal_temp_min_c | round | int }}&ndash;{{ item.ideal_temp_max_c | round | int }}&deg;C,
+                            {{ item.ideal_humidity_min | round | int }}&ndash;{{ item.ideal_humidity_max | round | int }}% RH
+                        </span>
+                        {% endif %}
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        {# --- sidebar ------------------------------------------------------ #}
+        <div class="stack">
+            <section class="card">
+                <div class="item-card__media" style="height:190px;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
+                    {% if item.image_path %}
+                        <img src="{{ url_for('static', filename='uploads/' ~ item.image_path) }}"
+                             alt="Photograph of {{ item.label }}">
+                    {% else %}
+                        <span class="item-card__emoji" style="font-size:3.4rem" role="img"
+                              aria-label="{{ item.food_name }}">{{ item.food_emoji }}</span>
+                    {% endif %}
+                </div>
+                <div class="card__body">
+                    <dl class="kv">
+                        <dt>Produce</dt><dd>{{ item.food_name }}</dd>
+                        {% if item.quantity %}<dt>Quantity</dt><dd>{{ item.quantity }}</dd>{% endif %}
+                        <dt>Storage</dt><dd>{{ item.storage | capitalize }}</dd>
+                        <dt>Modelled at</dt>
+                        <dd>
+                            {% if item.environment_temperature_c is not none %}
+                                {{ '%.1f' % item.environment_temperature_c }} &deg;C /
+                                {{ '%.0f' % item.environment_humidity_pct }} %
+                                <span class="tag">{{ item.environment_source }}</span>
+                            {% else %}&mdash;{% endif %}
+                        </dd>
+                        <dt>Stored since</dt><dd>{{ item.stored_at | localtime }}</dd>
+                        <dt>Age</dt><dd>{{ item.days_stored }} days</dd>
+                        <dt>Ideal temp</dt>
+                        <dd>{% if item.ideal_temp_min_c is not none %}{{ item.ideal_temp_min_c | round | int }}&ndash;{{ item.ideal_temp_max_c | round | int }} &deg;C{% else %}&mdash;{% endif %}</dd>
+                        <dt>Ideal RH</dt>
+                        <dd>{% if item.ideal_humidity_min is not none %}{{ item.ideal_humidity_min | round | int }}&ndash;{{ item.ideal_humidity_max | round | int }} %{% else %}&mdash;{% endif %}</dd>
+                        <dt>Status</dt><dd>{{ item.status | capitalize }}</dd>
+                    </dl>
+                    {% if raw_item.food_notes %}
+                    <p class="tiny muted" style="margin-top:0.8rem">{{ raw_item.food_notes }}</p>
+                    {% endif %}
+                    {% if item.notes %}
+                    <hr class="divider">
+                    <div class="small"><span class="muted">Your notes:</span> {{ item.notes }}</div>
+                    {% endif %}
+                </div>
+            </section>
+
+            {% if item.status == 'active' %}
+            <section class="card">
+                <div class="card__header"><h2>Close this item</h2></div>
+                <div class="card__body stack" style="gap:0.55rem">
+                    <p class="small muted">
+                        Recording the outcome builds the ground-truth history that a trained
+                        model will eventually need.
+                    </p>
+                    <button class="btn btn--ghost btn--block" data-close-item="consumed">
+                        {{ icon('check-circle', 15) }}Mark as consumed
+                    </button>
+                    <button class="btn btn--danger btn--block" data-close-item="discarded">
+                        {{ icon('trash', 15) }}Mark as discarded
+                    </button>
+                </div>
+            </section>
+            {% else %}
+            <section class="card">
+                <div class="card__body">
+                    <p class="small">
+                        Closed as <strong>{{ item.status }}</strong> on {{ item.closed_at | localtime }}.
+                    </p>
+                    <button class="btn btn--ghost btn--block" style="margin-top:0.6rem" data-close-item="active">
+                        Reopen tracking
+                    </button>
+                </div>
+            </section>
+            {% endif %}
+
+            {% if alerts %}
+            <section class="card">
+                <div class="card__header"><h2>Alert history</h2></div>
+                <div>
+                    {% for alert in alerts[:6] %}
+                    <div class="alert-row {{ 'is-acknowledged' if alert.acknowledged_at }}">
+                        <div class="alert-row__icon alert-row__icon--{{ 'crit' if alert.level == 'critical' else 'warning' }}">
+                            {{ icon('warning', 15) }}
+                        </div>
+                        <div class="alert-row__body">
+                            <div class="alert-row__title small">{{ alert.title }}</div>
+                            <div class="alert-row__time"><span data-relative="{{ alert.created_at }}"></span></div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </section>
+            {% endif %}
+
+            <section class="card">
+                <div class="card__body">
+                    <button class="btn btn--danger btn--block" id="deleteItemBtn">
+                        {{ icon('trash', 15) }}Delete this item and its history
+                    </button>
+                </div>
+            </section>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block modals %}
+<div class="modal" id="editItemModal" role="dialog" aria-modal="true" aria-labelledby="editItemTitle" aria-hidden="true">
+    <div class="modal__panel">
+        <div class="modal__header">
+            <h2 id="editItemTitle">Edit item</h2>
+            <button class="btn btn--ghost btn--icon" data-modal-close aria-label="Close">{{ icon('x', 16) }}</button>
+        </div>
+        <form id="editItemForm">
+            <div class="modal__body">
+                <div class="field">
+                    <label class="field__label" for="edit-label">Item name</label>
+                    <input class="input" id="edit-label" name="label" type="text"
+                           maxlength="80" value="{{ item.label }}" required>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label class="field__label" for="edit-food_type_id">Produce type</label>
+                        <select class="select" id="edit-food_type_id" name="food_type_id">
+                            {% for food in food_types %}
+                            <option value="{{ food.id }}" {{ 'selected' if food.key == item.food_key }}>
+                                {{ food.emoji }} {{ food.name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label class="field__label" for="edit-quantity">Quantity</label>
+                        <input class="input" id="edit-quantity" name="quantity" type="text"
+                               maxlength="40" value="{{ item.quantity or '' }}">
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label class="field__label" for="edit-storage">Stored in</label>
+                        <select class="select" id="edit-storage" name="storage">
+                            {% for location in storage_locations %}
+                            <option value="{{ location }}" {{ 'selected' if location == item.storage }}>
+                                {{ location | capitalize }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label class="field__label" for="edit-stored_at">Stored since</label>
+                        <input class="input" id="edit-stored_at" name="stored_at" type="datetime-local">
+                    </div>
+                </div>
+                <div class="field">
+                    <label class="field__label" for="edit-image">Replace photo</label>
+                    <input class="input" id="edit-image" name="image" type="file"
+                           accept="image/jpeg,image/png,image/webp">
+                </div>
+                <div class="field">
+                    <label class="field__label" for="edit-notes">Notes</label>
+                    <textarea class="textarea" id="edit-notes" name="notes" maxlength="500">{{ item.notes or '' }}</textarea>
+                </div>
+            </div>
+            <div class="modal__footer">
+                <button type="button" class="btn btn--ghost" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn--primary">Save changes</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script id="itemData" type="application/json">{{ item | tojson }}</script>
+<script id="historyData" type="application/json">{{ history | tojson }}</script>
+<script id="envData" type="application/json">{{ environment | tojson }}</script>
+<script type="module" src="{{ url_for('static', filename='js/item-detail.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block title %}Error {{ code }}{% endblock %}
+{% block page_title %}Error {{ code }}{% endblock %}
+{% block content %}
+<div class="card"><div class="card__body">
+    <div class="empty">
+        <h3>{{ code }}</h3>
+        <p>{{ message }}</p>
+        <a class="btn btn--primary" href="{{ url_for('pages.dashboard') }}">Back to the dashboard</a>
+    </div>
+</div></div>
+{% endblock %}

@@ -1,0 +1,79 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% from 'admin/_shared.html' import admin_context, model_state %}
+
+{% block title %}Inference playground{% endblock %}
+{% block page_title %}Inference playground{% endblock %}
+{% block page_subtitle %}Run the trained model on an arbitrary image and sensor triple{% endblock %}
+
+{% block content %}
+<div class="stack">
+    {{ admin_context() }}
+    {{ model_state(model) }}
+
+    <div class="grid grid--split">
+        <section class="card">
+            <div class="card__header">{{ icon('image', 18) }}<h2>Input</h2></div>
+            <div class="card__body">
+                <form id="playgroundForm">
+                    <div class="field">
+                        <label class="field__label" for="pgImage">Food image</label>
+                        <div class="drop-zone" id="dropZone" role="button" tabindex="0"
+                             aria-label="Choose or drop a food image">
+                            <div id="dropPrompt">
+                                {{ icon('image', 30) }}
+                                <p class="small" style="margin-top:0.5rem">
+                                    Drop a JPEG or PNG here, or click to choose one
+                                </p>
+                            </div>
+                            <img id="preview" alt="Selected image preview" hidden>
+                        </div>
+                        <input class="visually-hidden" id="pgImage" name="image" type="file"
+                               accept="image/jpeg,image/png">
+                    </div>
+
+                    <div class="field-row">
+                        <div class="field">
+                            <label class="field__label" for="pgTemp">Temperature</label>
+                            <input class="input" id="pgTemp" name="temperature" type="number"
+                                   step="0.01" value="28.00" required>
+                        </div>
+                        <div class="field">
+                            <label class="field__label" for="pgHumidity">Humidity</label>
+                            <input class="input" id="pgHumidity" name="humidity" type="number"
+                                   step="0.01" value="60.00" required>
+                        </div>
+                        <div class="field">
+                            <label class="field__label" for="pgGas">Gas</label>
+                            <input class="input" id="pgGas" name="gas" type="number"
+                                   step="0.01" value="185.00" required>
+                        </div>
+                    </div>
+
+                    <p class="field__hint" style="margin-bottom:0.9rem">
+                        Feature order is fixed at
+                        <span class="mono">[Temperature, Humidity, Gas]</span> and scaled with the
+                        fitted scaler. Day is deliberately not an input.
+                    </p>
+
+                    <button class="btn btn--primary btn--block" type="submit" id="pgSubmit"
+                            {{ 'disabled' if not model.trained_model_available }}>
+                        {{ icon('cpu', 15) }}Predict remaining shelf life
+                    </button>
+                </form>
+            </div>
+        </section>
+
+        <section class="card">
+            <div class="card__header">{{ icon('activity', 18) }}<h2>Output</h2></div>
+            <div class="card__body" id="pgResult">
+                <p class="small muted">Run a prediction to see the model output here.</p>
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{{ url_for('static', filename='js/admin-playground.js') }}"></script>
+{% endblock %}

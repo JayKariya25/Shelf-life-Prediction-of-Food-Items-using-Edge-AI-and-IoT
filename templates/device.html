@@ -1,0 +1,224 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% from '_components.html' import model_banner, empty_state %}
+
+{% block title %}Device &amp; Model{% endblock %}
+{% block page_title %}Device &amp; model{% endblock %}
+{% block page_subtitle %}Edge hardware, data source and the estimator in use{% endblock %}
+
+{% block topbar_actions %}
+    <button class="btn btn--primary btn--sm" data-modal-open="addDeviceModal">
+        {{ icon('plus', 15) }}<span>Register device</span>
+    </button>
+{% endblock %}
+
+{% block content %}
+<div class="stack">
+    {{ model_banner(model) }}
+
+    <div class="grid grid--halves">
+        {# --- devices ---------------------------------------------------- #}
+        <section class="card">
+            <div class="card__header">
+                <h2>Registered devices</h2>
+                <span class="pill pill--muted">{{ devices | length }}</span>
+            </div>
+            {% if devices %}
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr><th>Name</th><th>Location</th><th>Status</th><th>Last seen</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        {% for device in devices %}
+                        <tr data-device-id="{{ device.id }}">
+                            <td>
+                                <div class="strong">{{ device.name }}</div>
+                                <div class="tiny mono muted">{{ device.token_prefix }}&hellip;</div>
+                            </td>
+                            <td class="muted">{{ device.location or '&mdash;' | safe }}</td>
+                            <td>
+                                {% if device.online %}
+                                <span class="pill pill--ok"><span class="pill__dot pill__dot--pulse"></span>Online</span>
+                                {% else %}
+                                <span class="pill pill--muted"><span class="pill__dot"></span>Offline</span>
+                                {% endif %}
+                            </td>
+                            <td class="muted tiny"><span data-relative="{{ device.last_seen_at }}"></span></td>
+                            <td>
+                                <button class="btn btn--ghost btn--icon btn--sm" data-delete-device="{{ device.id }}"
+                                        aria-label="Remove device" title="Remove device">{{ icon('trash', 14) }}</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="card__body">
+                {{ empty_state('No devices registered',
+                    'Register the Raspberry Pi to get a token, then run the agent in tools/pi_agent.py
+                     on the Pi so real BMP280 and SHT31 readings replace the simulator.',
+                    'Register device', 'data-modal-open="addDeviceModal"') }}
+            </div>
+            {% endif %}
+            <div class="card__footer">
+                <p class="card__hint">
+                    Sensor source is <strong>{{ config.sensor_source }}</strong>; a device counts as
+                    online for {{ config.device_online_seconds }} s after it last reported.
+                </p>
+            </div>
+        </section>
+
+        {# --- model card -------------------------------------------------- #}
+        <section class="card">
+            <div class="card__header"><h2>Estimator</h2></div>
+            <div class="card__body">
+                <dl class="kv">
+                    <dt>Active model</dt><dd>{{ model.active_model }}</dd>
+                    <dt>Version</dt><dd>{{ model.active_version }}</dd>
+                    <dt>Kind</dt>
+                    <dd>
+                        {% if model.active_kind == 'trained-model' %}
+                        <span class="pill pill--ok">Trained model</span>
+                        {% else %}
+                        <span class="pill pill--warn">Heuristic baseline</span>
+                        {% endif %}
+                    </dd>
+                    <dt>Uses image</dt><dd>{{ 'Yes' if model.uses_image else 'No' }}</dd>
+                    <dt>Calibrated confidence</dt>
+                    <dd>{{ 'Yes' if model.supports_calibrated_confidence else 'No - the baseline reports none' }}</dd>
+                    <dt>Trained model file</dt>
+                    <dd>
+                        {% if model.trained_model_available %}Loaded
+                        {% elif model.trained_model_configured %}Configured but not loaded
+                        {% else %}Not configured{% endif %}
+                    </dd>
+                </dl>
+
+                {% if model.trained_model_error %}
+                <div class="banner banner--warn" style="margin-top:0.9rem">
+                    {{ icon('warning', 17) }}
+                    <div class="banner__body small">{{ model.trained_model_error }}</div>
+                </div>
+                {% endif %}
+
+                <hr class="divider">
+                <h4>Enabling the trained model</h4>
+                <p class="small muted">
+                    Export the multimodal model to TFLite, place it in
+                    <span class="mono">models/</span>, then start the app with
+                    <span class="mono">MODEL_PATH</span> pointing at it. The app switches over
+                    automatically and every prediction is re-tagged as
+                    <span class="mono">trained-model</span>. If the file fails to load, it falls
+                    back to the baseline rather than serving nothing.
+                </p>
+            </div>
+        </section>
+    </div>
+
+    {# --- integration guide ---------------------------------------------- #}
+    <section class="card">
+        <div class="card__header"><h2>Raspberry Pi integration</h2></div>
+        <div class="card__body">
+            <p class="small muted">
+                The Pi pushes readings to this server. Nothing is polled from the device, so the
+                agent works behind NAT and can buffer while offline.
+            </p>
+
+            <h4 style="margin-top:1rem">Send one reading</h4>
+            <div class="code-block">curl -X POST {{ request.url_root }}api/device/v1/readings \
+  -H "Authorization: Bearer &lt;device-token&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{"temperature_c": 24.8, "humidity_pct": 61.2}'</div>
+
+            <h4 style="margin-top:1.1rem">Send a buffered batch</h4>
+            <div class="code-block">POST /api/device/v1/readings/batch
+{"readings": [{"temperature_c": 24.8, "humidity_pct": 61.2,
+               "recorded_at": "2026-08-25T10:30:00Z"}, ...]}</div>
+
+            <h4 style="margin-top:1.1rem">Upload a camera frame</h4>
+            <div class="code-block">POST /api/device/v1/captures   (multipart: image=&lt;file&gt;, item_id=&lt;id&gt;)</div>
+
+            <p class="small muted" style="margin-top:1rem">
+                A ready-made agent lives in <span class="mono">tools/pi_agent.py</span>. It reads
+                the BMP280 and SHT31 over I2C when the libraries are present, buffers to disk when
+                the network drops, and posts on an interval.
+            </p>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card__header"><h2>Runtime</h2></div>
+        <div class="card__body">
+            <dl class="kv">
+                <dt>Environment</dt><dd>{{ config.env_name }}</dd>
+                <dt>App version</dt><dd>{{ app_version }}</dd>
+                <dt>Sensor source</dt><dd>{{ config.sensor_source }} (currently {{ sensor_mode }})</dd>
+                <dt>Reading retention</dt><dd>{{ config.retention_days }} days</dd>
+                <dt>Server time (UTC)</dt><dd class="mono">{{ now.strftime('%Y-%m-%d %H:%M:%S') }}</dd>
+            </dl>
+        </div>
+    </section>
+</div>
+{% endblock %}
+
+{% block modals %}
+<div class="modal" id="addDeviceModal" role="dialog" aria-modal="true" aria-labelledby="addDeviceTitle" aria-hidden="true">
+    <div class="modal__panel">
+        <div class="modal__header">
+            <h2 id="addDeviceTitle">Register a device</h2>
+            <button class="btn btn--ghost btn--icon" data-modal-close aria-label="Close">{{ icon('x', 16) }}</button>
+        </div>
+        <form id="addDeviceForm">
+            <div class="modal__body">
+                <div class="field">
+                    <label class="field__label" for="device-name">Device name</label>
+                    <input class="input" id="device-name" name="name" type="text"
+                           maxlength="60" placeholder="Kitchen Pi 5" required>
+                </div>
+                <div class="field">
+                    <label class="field__label" for="device-location">Location <span class="muted">(optional)</span></label>
+                    <input class="input" id="device-location" name="location" type="text"
+                           maxlength="60" placeholder="Kitchen shelf">
+                </div>
+                <div class="banner banner--info">
+                    {{ icon('key', 17) }}
+                    <div class="banner__body small">
+                        You will be shown a token once. Store it on the Pi as
+                        <span class="mono">SHELFLIFE_TOKEN</span>.
+                    </div>
+                </div>
+            </div>
+            <div class="modal__footer">
+                <button type="button" class="btn btn--ghost" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn--primary">Create token</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="modal" id="tokenModal" role="dialog" aria-modal="true" aria-labelledby="tokenTitle" aria-hidden="true">
+    <div class="modal__panel">
+        <div class="modal__header">
+            {{ icon('key', 18) }}
+            <h2 id="tokenTitle">Copy this token now</h2>
+        </div>
+        <div class="modal__body">
+            <p class="small muted">
+                Only a hash of this token is stored on the server, so this is the one and only
+                time it can be shown. Save it on the Pi as <span class="mono">SHELFLIFE_TOKEN</span>.
+            </p>
+            <div class="code-block" id="tokenValue" style="margin:0.85rem 0;white-space:pre-wrap;word-break:break-all"></div>
+            <button class="btn btn--ghost btn--block" id="copyTokenBtn">{{ icon('copy', 15) }}Copy to clipboard</button>
+        </div>
+        <div class="modal__footer">
+            <button type="button" class="btn btn--primary" id="tokenDoneBtn">I have saved it</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{{ url_for('static', filename='js/device.js') }}"></script>
+{% endblock %}

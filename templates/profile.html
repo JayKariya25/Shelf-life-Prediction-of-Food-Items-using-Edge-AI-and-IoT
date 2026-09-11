@@ -1,0 +1,96 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+
+{% block title %}Profile{% endblock %}
+{% block page_title %}Profile{% endblock %}
+{% block page_subtitle %}Your account and what the system has recorded so far{% endblock %}
+
+{% block content %}
+<div class="stack">
+    <section class="grid grid--stats">
+        <div class="stat">
+            <div class="stat__label">{{ icon('box', 14) }}Items tracked</div>
+            <div class="stat__value">{{ stats.items_tracked }}</div>
+            <div class="stat__meta">{{ stats.items_active }} still active</div>
+        </div>
+        <div class="stat">
+            <div class="stat__label">{{ icon('activity', 14) }}Predictions logged</div>
+            <div class="stat__value">{{ stats.predictions_logged }}</div>
+            <div class="stat__meta">Every run is stored for evaluation</div>
+        </div>
+        <div class="stat">
+            <div class="stat__label">{{ icon('database', 14) }}Live readings</div>
+            <div class="stat__value">{{ stats.live_readings }}</div>
+            <div class="stat__meta">Hardware samples only, never simulated</div>
+        </div>
+        <div class="stat">
+            <div class="stat__label">{{ icon('trending-down', 14) }}Waste rate</div>
+            <div class="stat__value">
+                {% if stats.waste_rate is not none %}{{ stats.waste_rate }}<small>%</small>{% else %}&mdash;{% endif %}
+            </div>
+            <div class="stat__meta">
+                {% if stats.waste_rate is not none %}
+                    {{ stats.items_discarded }} discarded of {{ stats.items_consumed + stats.items_discarded }} closed
+                {% else %}
+                    Close an item to start measuring
+                {% endif %}
+            </div>
+        </div>
+    </section>
+
+    <div class="grid grid--halves">
+        <section class="card">
+            <div class="card__header">{{ icon('user', 18) }}<h2>Account</h2></div>
+            <div class="card__body">
+                <dl class="kv">
+                    <dt>Name</dt><dd>{{ user.full_name or 'Not provided' }}</dd>
+                    <dt>Email</dt><dd>{{ user.email or 'Not provided' }}</dd>
+                    <dt>Mobile</dt><dd>{{ user.mobile or 'Not provided' }}</dd>
+                    <dt>Registered</dt><dd>{{ user.created_at | localtime }}</dd>
+                    <dt>Last sign-in</dt>
+                    <dd>{% if user.last_login_at %}{{ user.last_login_at | localtime }}{% else %}This is your first session{% endif %}</dd>
+                </dl>
+            </div>
+        </section>
+
+        <section class="card">
+            <div class="card__header">{{ icon('sliders', 18) }}<h2>Preferences</h2></div>
+            <div class="card__body">
+                <dl class="kv">
+                    <dt>Reminder threshold</dt><dd>{{ settings.alert_days_before }} days ahead</dd>
+                    <dt>Email alerts</dt>
+                    <dd>
+                        <span class="pill pill--{{ 'ok' if settings.email_notifications else 'muted' }}">
+                            {{ 'Enabled' if settings.email_notifications else 'Disabled' }}
+                        </span>
+                    </dd>
+                    <dt>SMS alerts</dt>
+                    <dd>
+                        <span class="pill pill--{{ 'ok' if settings.sms_notifications else 'muted' }}">
+                            {{ 'Enabled' if settings.sms_notifications else 'Disabled' }}
+                        </span>
+                    </dd>
+                    <dt>Devices</dt><dd>{{ stats.devices }} registered</dd>
+                    <dt>Alerts raised</dt><dd>{{ stats.alerts_raised }}</dd>
+                </dl>
+                <a class="btn btn--ghost btn--block" style="margin-top:1rem"
+                   href="{{ url_for('pages.alerts') }}">{{ icon('bell', 15) }}Change alert settings</a>
+            </div>
+        </section>
+    </div>
+
+    <section class="card">
+        <div class="card__header">{{ icon('shield', 18) }}<h2>Session</h2></div>
+        <div class="card__body">
+            <p class="small muted">
+                Sessions are signed cookies scoped to this origin, marked HttpOnly and SameSite=Lax,
+                and rotated on every sign-in. Signing out clears the session immediately.
+            </p>
+            <form method="post" action="{{ url_for('auth.logout') }}" style="margin-top:0.9rem">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn--danger" type="submit">{{ icon('logout', 15) }}Sign out</button>
+            </form>
+        </div>
+    </section>
+</div>
+{% endblock %}

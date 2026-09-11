@@ -1,0 +1,12 @@
+# Environment that can serve the trained multimodal Keras model.
+# Install into a Python 3.12 virtualenv - TensorFlow has no 3.14 wheel.
+#
+#   python3.12 -m venv .venv-model
+#   .venv-model/bin/pip install -r requirements-model.txt
+
+Flask>=3.0,<4.0
+tensorflow>=2.16,<2.21
+scikit-learn>=1.3     # provides the StandardScaler that sensor_scaler.pkl unpickles into
+joblib>=1.3           # loads the fitted scaler
+pillow>=10.0          # image decoding and resizing
+numpy>=1.26
