@@ -51,37 +51,79 @@ console can never be locked away behind a database edit.
 
 This is the part that matters most for the report, so it is stated plainly.
 
-The app runs **whichever estimator can actually serve the request**, and always
-says which one it used.
+Two estimators are available, and every prediction records which one produced it
+(`model_kind`: `trained-model` or `heuristic-baseline`). That tag drives the banners on
+the dashboard and item pages; nothing in the UI implies the trained model ran when it
+did not.
 
 | | Status |
 |---|---|
-| Multimodal remaining-shelf-life regression (image + T/H/Gas) | **Working** — when the trained model is installed |
-| Temperature / humidity driven estimation | **Working** — Q10 kinetic baseline, always available |
-| Degradation integrated over the conditions actually experienced | **Working** (baseline path) |
-| Calibrated class confidence | **Not available** — the trained model is a single-output regressor |
-| Uncertainty interval | Only when `config.json` publishes a `test_mae` |
-
-Every prediction is tagged `model_kind` — `trained-model` or
-`heuristic-baseline` — and the tag drives the banners on the dashboard and item
-pages. Nothing in the UI implies a trained model is running when it is not.
+| Remaining shelf life from a photograph | **Working** — the project's trained image ensemble, `ml/rsl_multimodal` |
+| Temperature/humidity kinetic estimate | **Working** — Q10 baseline, always available |
+| Reproduces the model's published test error inside the website | **Verified** — MAE 0.1468 on all 271 held-out frames |
+| Calibrated class confidence | **Not available** — the model is a single-output regressor |
+| Uncertainty band | ±0.85 days — the model's error on days it never saw |
 
 ### When the trained model is used, and when it is not
 
-The trained model requires **an image and all three sensor values**
-(Temperature, Humidity, Gas). If either is missing for a given item, the app
-falls back to the baseline and records *why*, which is shown on the item page:
+The served model reads the photograph and nothing else, so it has two preconditions:
 
-> Estimated with the kinetic baseline because this item has no photograph on file
-> and no gas reading is available.
+- **The produce it was trained on** — `RSL_TRAINED_FOOD_KEYS`, which is `banana`. The
+  training data is a single 11-day banana run and has no food column at all, so the
+  bundle cannot state this and the application does. A tomato photograph scored by a
+  banana-only model would be a confident number about a food it has never seen, so
+  tomato items use the kinetic baseline, which *is* food-aware through `FOOD_TYPE_SEED`.
+- **A recent photo** — under `RSL_MAX_PHOTO_AGE_HOURS` (6 h) from the newest reading.
+  The model estimates from what the food looks like *now*; a day-old photo would
+  report a day-old answer.
 
-This matters for the reference hardware: **the BMP280 + SHT31 build has no gas
-sensor**, so live monitoring falls back to the baseline until an MQ-135 (or
-equivalent) reports. The admin playground and evaluation pages supply all three
-inputs directly, so the trained model runs there regardless.
+Otherwise the item falls back to the kinetic baseline, and the item page says exactly
+why:
 
-The freshness class shown in the user interface is *derived* from the predicted
-remaining days, not predicted separately — the rationale on each item says so.
+> Estimated with the kinetic baseline because the trained model was fitted on banana
+> only, and this item is tomato (its photograph would be scored by a model that has
+> never seen this food).
+
+No gas reading, no reading history and no temperature inside a trained envelope are
+required any more. That is a consequence of the accuracy work below, not a relaxation:
+the export that needed those three things is the one that scored worse.
+
+**The honest error figure is ±0.85 days, not 0.15.** The 0.147-day MAE is measured on
+frames from the same 11-day run the model trained on, and that split is largely
+duplicate retrieval — a 1-nearest-neighbour lookup on *untrained* ImageNet features
+scores 0.081 MAE on it. Every item a user tracks is a batch the model has never seen,
+so the website shows the leave-one-day-out error instead. The model was trained on one
+food, one camera and one room; treat its output elsewhere with that in mind.
+
+### Why a photograph-only model, and why an ensemble
+
+`ml/rsl_multimodal/scripts/experiments.py` scores candidates by leave-one-day-out, the
+only protocol this dataset supports honestly. Over six training seeds:
+
+| | LODO MAE (days) | Within-session MAE |
+|---|---|---|
+| sensor branch | 2.392 ± 0.106 | 0.720 |
+| fusion head (served until now) | 1.113 ± 0.179 | 0.266 |
+| image head, one seed | 0.920 ± 0.086 | 0.220 |
+| **image head, 6-seed ensemble** | **0.848** | **0.147** |
+
+Two findings. The image branch beats fusion on an unseen day — it wins on 4 of 6 seeds,
+mean margin 0.193 days — because the sensor branch learned the ambient conditions of the
+one 11-day run it saw, and the fusion head leans on it. And averaging several heads beats
+any single head, because head training is the largest source of run-to-run variance here
+(±0.086 is as large as the gaps between whole architectures). Every other variant tried —
+sensor dropout, image augmentation, a dynamics-only feature set — made things worse; the
+numbers are in `results/experiments.json`.
+
+Rebuild and re-measure with:
+
+```bash
+.venv-model/bin/python scripts/train_image_ensemble.py --lodo   # the honest figure
+.venv-model/bin/python scripts/train_image_ensemble.py          # train + export
+```
+
+The freshness class is *derived* from the predicted days (days ÷ 11), not predicted
+separately.
 
 ### The baseline estimator (fallback)
 
@@ -127,10 +169,15 @@ tracked item. Anything still in use is left alone and reported.
 
 ### Sensors used
 
-Temperature and humidity only. The BMP280's **pressure** reading is still
-accepted and stored when hardware sends it, but it is not displayed anywhere and
-not sent to the browser, because nothing in the model or the baseline uses it.
-Gas is optional and only needed by the trained model.
+Temperature, humidity and gas. The BMP280's **pressure** reading is still accepted
+and stored when hardware sends it, but it is not displayed anywhere and not sent to
+the browser, because neither estimator uses it.
+
+Gas is used by **neither** estimator as it now stands. The project's gas sensor reports
+raw, uncalibrated values (about 150–195 across the whole training run), so the kinetic
+baseline ignores it rather than guess a ppm scale, and the served image ensemble takes no
+sensor input at all. Devices still send it as `gas_ppm`, in the same units the training
+rig recorded: it is stored, charted, and read by the fusion export if you switch to it.
 
 Reference shelf-life and Q10 values come from standard postharvest storage
 guidance and live in `FOOD_TYPE_SEED` in [`shelflife/db.py`](shelflife/db.py).
@@ -153,27 +200,20 @@ python app.py                  # http://127.0.0.1:5000
 
 Runs on any Python 3.10+. Serves the Q10 kinetic baseline and says so.
 
-### With the trained multimodal model
+### With the trained shelf-life model
 
-> **TensorFlow publishes no wheel for Python 3.14.** If your main virtualenv is
-> on 3.14 the Keras model cannot load there — the Model card page will tell you
-> exactly that. Use a Python 3.12 environment instead.
+> **TensorFlow publishes no wheel for Python 3.14.** Serve the model from a Python
+> 3.12 environment; on 3.14 the Model card page reports that the runtime is missing
+> and the site keeps working on the baseline.
 
 ```bash
 python3.12 -m venv .venv-model
 .venv-model/bin/pip install -r requirements-model.txt
-
-# drop the artifacts in place (see models/README.md)
-#   models/best_multimodal_model.keras
-#   artifacts/sensor_scaler.pkl
-#   artifacts/config.json
-#   artifacts/dataset_splits.csv      (admin evaluation page)
-#   data/Images/                      (images named by the splits file)
-
-.venv-model/bin/python app.py
+sh tools/serve.sh                    # http://127.0.0.1:8000 and your LAN address
 ```
 
-Confirm what loaded:
+The model is already in the repository, in `ml/rsl_multimodal/` — see
+[The model folder](#the-model-folder). Confirm what loaded:
 
 ```bash
 .venv-model/bin/python -m flask --app app model-check
@@ -190,22 +230,21 @@ flask --app app seed-demo --email you@example.com    # optional sample items
 ### Running the tests
 
 ```bash
-python -m unittest discover -s tests -t .
+python -m unittest discover -s tests -t .                  # fast, baseline only
+.venv-model/bin/python -m unittest discover -s tests -t .  # everything
 ```
 
-264 tests, standard library only — no test framework to install.
+Standard library `unittest` only. Without TensorFlow, the model tests skip.
 
-The 32 tests that exercise the real Keras path skip automatically when the model
-runtime is absent. To run them, use the model environment:
+With it, they cover three layers:
 
-```bash
-.venv-model/bin/python -m unittest discover -s tests -t .
-```
-
-They build a throwaway Keras model with the *same input contract* as the trained
-export and drive the whole path — load, signature validation, preprocessing,
-inference, evaluation and fallback — so the integration is covered without
-committing a large binary to the repository. See `tools/make_fixture_model.py`.
+* a **fixture** TFLite model with the real model's exact input contract
+  (`tools/make_rsl_fixture.py`), bundled with the real `pi_features.py` and
+  `image_io.py`, driving the whole website path — device readings, photo capture,
+  fallback rules, playground sessions, evaluation;
+* the **real bundle**, checking the published envelope, error figures and gates;
+* the **real accuracy**: the website scores all 271 held-out frames and must match the
+  published test MAE (skipped if `data_images/` has not been copied in).
 
 ---
 
@@ -213,9 +252,9 @@ committing a large binary to the repository. See `tools/make_fixture_model.py`.
 
 ```
                   ┌──────────────────────────────┐
-   BMP280  ───┐   │  Raspberry Pi 5              │
-   SHT31   ───┼──▶│  tools/pi_agent.py           │
-   Camera  ───┘   │  reads I2C, buffers, uploads │
+   SHT31   ───┐   │  Raspberry Pi 5              │
+   Gas     ───┼──▶│  tools/pi_agent.py           │
+   Camera  ───┘   │  readings every 2 min, photos │
                   └──────────────┬───────────────┘
                                  │ HTTP + bearer token
                                  ▼
@@ -230,13 +269,15 @@ committing a large binary to the repository. See `tools/make_fixture_model.py`.
    │                                                          │
    │   services.py   ── items, alerts, snapshots               │
    │   inference.py  ── registry: trained model │ Q10 baseline │
-   │   multimodal.py ── Keras adapter (image + T/H/Gas)        │
+   │   rsl_model.py  ── TFLite RSL model, served in-process     │
    │   dataset.py    ── held-out split + regression metrics    │
    │   sensors.py    ── validation + labelled simulator        │
    │   db.py         ── SQLite schema, migrations, seed data   │
-   └─────────────────────────────┬────────────────────────────┘
-                                 ▼
-                         SQLite (database.db)
+   └───────────────┬───────────────────────────┬─────────────┘
+                   ▼                           ▼
+           SQLite (database.db)      ml/rsl_multimodal/
+                                     model, scaler, pi_features.py,
+                                     image_io.py, results
 ```
 
 ### Files
@@ -247,7 +288,8 @@ committing a large binary to the repository. See `tools/make_fixture_model.py`.
 | `shelflife/config.py` | Environment-driven config; refuses to start prod without `SECRET_KEY` |
 | `shelflife/db.py` | Schema, forward-only migrations, produce reference data |
 | `shelflife/inference.py` | Registry that picks the estimator that can serve each request |
-| `shelflife/multimodal.py` | Trained Keras model adapter (loading, validation, inference) |
+| `shelflife/rsl_model.py` | Loads and runs the trained model from its bundle |
+| `ml/rsl_multimodal/` | The trained model, its training pipeline, notebooks and report |
 | `shelflife/dataset.py` | Held-out split reader and MAE/RMSE/R² |
 | `shelflife/blueprints/admin.py` | Developer console, admin-gated |
 | `shelflife/sensors.py` | Reading validation and the deterministic simulator |
@@ -255,7 +297,8 @@ committing a large binary to the repository. See `tools/make_fixture_model.py`.
 | `shelflife/security.py` | CSRF, sessions, device tokens, rate limiting |
 | `templates/`, `static/` | UI — no build step, no CDN |
 | `tools/pi_agent.py` | Raspberry Pi sensor agent |
-| `tools/make_fixture_model.py` | Builds a contract-identical stand-in model for tests |
+| `tools/make_rsl_fixture.py` | Builds a contract-identical stand-in bundle for tests |
+| `tools/serve.sh` | Serves the site on your network with waitress |
 | `tests/` | 264 unit and integration tests |
 
 ---
@@ -336,10 +379,22 @@ only its SHA-256 hash is stored.
 
 ```bash
 pip install adafruit-circuitpython-bmp280 adafruit-circuitpython-sht31d
-export SHELFLIFE_URL=http://<pi-address>:8000
+export SHELFLIFE_URL=http://<server-address>:8000
 export SHELFLIFE_TOKEN=slp_...
+
+# for the trained model:
+export SHELFLIFE_GAS_COMMAND="python3 /home/pi/read_gas.py"   # prints one number
+export SHELFLIFE_ITEM_ID=7                                      # item to photograph
 python3 tools/pi_agent.py
 ```
+
+The agent does not guess how to read your gas sensor. `SHELFLIFE_GAS_COMMAND` must
+print the value **in the same units your training rig recorded** — about 150–195 in
+the training run. A differently-scaled value lands every reading outside the model's
+envelope, and the website will (correctly) fall back to the baseline.
+
+Photos are taken every 30 minutes with `rpicam-still` or `libcamera-still` (override
+with `SHELFLIFE_CAPTURE_COMMAND`, using `{path}` for the output file).
 
 The agent reads the SHT31 for temperature and humidity and the BMP280 for
 pressure, buffers to disk when the network drops, and flushes the buffer as a
@@ -405,7 +460,8 @@ Every one of these returns **403** for a `user` account.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/admin/api/predict` | Manual inference on an uploaded image (multipart) |
+| POST | `/admin/api/predict` | One playground reading: `image`, `temperature`, `humidity`, `gas`, `session`, `minutes_since_previous`, `reset` |
+| POST | `/admin/api/playground/reset` | Clear a playground session |
 | GET | `/admin/api/test-samples` | List the held-out rows |
 | GET | `/admin/api/test-samples/<i>/image` | Serve a held-out image, addressed by index |
 | POST | `/admin/api/test-samples/<i>/predict` | Score one held-out row |
@@ -422,12 +478,12 @@ Every one of these returns **403** for a `user` account.
 | GET | `/api/device/v1/config` | Verify the token, learn the reporting interval |
 | POST | `/api/device/v1/readings` | One reading |
 | POST | `/api/device/v1/readings/batch` | Up to 500 buffered readings |
-| POST | `/api/device/v1/captures` | Camera frame (multipart) |
+| POST | `/api/device/v1/captures` | Camera frame (multipart: `image`, `item_id`, optional `captured_at`) |
 
 ```bash
 curl -X POST http://<host>:8000/api/device/v1/readings \
   -H "Authorization: Bearer slp_..." -H "Content-Type: application/json" \
-  -d '{"temperature_c": 24.8, "humidity_pct": 61.2, "pressure_hpa": 1008.1}'
+  -d '{"temperature_c": 28.7, "humidity_pct": 58.0, "gas_ppm": 185}'
 ```
 
 Readings are range-checked against the BMP280 and SHT31 datasheet limits.
@@ -438,53 +494,84 @@ buffer.
 
 ---
 
-## The trained multimodal model
+## The model folder
 
-### Inference contract
-
-The adapter reproduces the project's Streamlit demo exactly, and **validates it
-on load** rather than trusting it:
+`ml/rsl_multimodal/` is the complete model project — training scripts, notebooks,
+report, results and the exported model — copied in from
+`~/Downloads/CAPSTONE DATASET/RSL_Multimodal_Model`. The website reads from it
+directly, so the code that must agree with the model always ships with it:
 
 ```
-inputs   image  (None, 224, 224, 3)   named "image"
-         sensor (None, 3)             named "sensor"
-output   (None, 1)                    remaining shelf life, in days
-
-image    RGB -> resize(224, 224, BILINEAR) -> mobilenet_v3.preprocess_input
-sensor   [Temperature, Humidity, Gas] -> fitted StandardScaler.transform -> float32
+ml/rsl_multimodal/
+├── models/image_ensemble_blocked_full_float16.tflite   the served model (4.1 MB)
+├── models/fusion_blocked_full_float16.tflite   the older two-input export (2.3 MB)
+├── artifacts/sensor_scaler.pkl                 scaler + the 27 feature names
+├── artifacts/preprocessing_config.json         outlier bounds, input envelope
+├── artifacts/master_dataset.csv                held-out split for the admin console
+├── scripts/pi_features.py                      builds the 27 sensor features
+├── scripts/image_io.py                         decodes photos exactly as training did
+├── results/                                    published metrics and gate results
+├── data_images/                                training frames (not in git)
+└── README.md, REPORT.md, QUICKSTART.md, INTEGRATION.md
 ```
 
-A model whose input names, shapes or output rank differ is **refused**, and the
-reason is displayed on the Model card page. `config.json` is checked for the
-sensor column order; a permuted order is rejected rather than silently producing
-wrong numbers. Day is never an input.
+**After retraining**, run the pipeline inside that folder (`bash run_all.sh`), then press
+**Reload artifacts** in the developer console — no restart needed. `run_all.sh` ends
+with two gates: `verify_pi_features.py` and `verify_serving_transform.py`. Don't serve a
+model that fails either.
 
-Loading is lazy and failure-tolerant: a missing artifact, an absent TensorFlow,
-or an exception mid-inference all degrade to the kinetic baseline with the cause
-recorded, instead of taking the site down.
+**What is in git.** The code, notebooks, docs, results, scaler, configs, dataset CSVs and
+the float16 export — about 8 MB, enough to run the site and reproduce the report. The
+3,067 training images, the `.keras` checkpoints, the other TFLite variants and the
+backbone cache are ignored; copy `data_images/` in by hand to use the evaluation page.
+
+### Fixes made to the model project
+
+Serving the model through the website turned up problems that raised no errors but
+changed predictions. They are fixed in `ml/rsl_multimodal`, and documented in its
+README and REPORT:
+
+| Problem | Effect | Fix |
+|---|---|---|
+| Serving decoded JPEGs with PIL; training used `tf.io.decode_jpeg` | test MAE 0.264 → 0.278 | `image_io.py`: TF-identical decoder |
+| Camera frames resized with BILINEAR; training used LANCZOS + JPEG q95 | camera-frame MAE 0.152 → 0.207 | `image_io.py` repeats the training transform; 60/60 rebuilt bit-for-bit |
+| An out-of-range first reading passed through while the API said it was clamped | out-of-distribution input | clipped to the outlier bound; warnings say what happened |
+| No flag for readings outside anything seen in training | silent extrapolation (−7.4 d) | `input_envelope` in the config; `UNRELIABLE` warnings |
+| `scikit-learn` unpinned; scaler pickled with 1.8.0 | version warning on a fresh install | pinned |
+| Missing `session_id` silently shared one session; failed requests advanced history | batches mixed | warned; rolled back on failure |
+
+### How the website runs it
+
+| | |
+|---|---|
+| Model | `image_ensemble_blocked_full_float16.tflite`: image (1, 224, 224, 3) → days, 6 heads averaged inside the graph |
+| Runtime | `tflite-runtime`, LiteRT or TensorFlow, whichever is installed |
+| Photo | RGB → LANCZOS 224×224 → JPEG q95 → TF-identical decode (skipped if already 224×224 JPEG) |
+| Sensors | not an input. They are still recorded, charted, and used by the baseline |
+| Output | clamped to 0–11 days; raw value kept for the developer console |
+| Band | ± leave-one-day-out MAE (0.85 days) |
+| Loading | validated on start — the graph's own input contract decides whether the sensor half of the bundle is read at all; failure degrades to the baseline |
+
+The two-input fusion export is still in the bundle and still supported: set
+`RSL_MODEL_FILE=models/fusion_blocked_full_float16.tflite` and the loader reads the
+scaler and feature builder again, re-imposes the gas and envelope preconditions, and
+quotes that model's own 1.17-day band. Nothing else changes.
+
+Devices are told to report every 120 s, the cadence the model was trained on. Photos
+come from `POST /api/device/v1/captures`, which also links the item to that device.
 
 ### The developer console
 
 | Page | What it does |
 |---|---|
-| **Console** | Model state, artifact checklist, where predictions came from |
-| **Model card** | Full input contract, published metrics, load errors |
-| **Playground** | Upload any image, set T/H/Gas, run one forward pass |
-| **Evaluation** | Score the held-out split: MAE, RMSE, R², bias, worst error, predicted-vs-actual scatter |
+| **Console** | Model state, where predictions came from |
+| **Model card** | Bundle files, input contract, operating envelope, leave-one-day-out table, TFLite variants, the 27 features, gate results |
+| **Playground** | A photo plus one reading at a time, in named sessions that build history like a real batch |
+| **Evaluation** | Scores the blocked test split from stored features; confirms the published MAE is reproduced |
 | **Accounts** | Roles and account activation |
-| **System** | Runtime paths, storage counts, reading pruning |
+| **System** | Runtime, paths, thresholds, reading pruning |
 
-The evaluation page reports its own measured metrics **next to** the ones
-published in `config.json`, with the delta, so drift between the training run
-and this environment is visible rather than assumed away.
-
-Everything is inference-only. The console never retrains, refits the scaler, or
-writes to the split metadata. Held-out images are served **by index** — the
-client never supplies a path — so the endpoint cannot become an arbitrary file
-read.
-
-`POST /admin/api/reload-model` re-reads the artifacts from disk, so a new export
-can be swapped in without restarting the server.
+Everything is inference-only. Held-out images are served **by index**, never by path.
 
 ## Security
 
