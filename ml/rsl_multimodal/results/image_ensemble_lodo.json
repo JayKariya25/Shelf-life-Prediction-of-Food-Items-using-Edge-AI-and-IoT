@@ -1,0 +1,211 @@
+{
+  "protocol": "leave-one-day-out; one day held out for test, the next for validation",
+  "heads": 6,
+  "seeds": [
+    42,
+    7,
+    2026,
+    13,
+    99,
+    404
+  ],
+  "folds": {
+    "1": {
+      "held_out_samples": 111,
+      "validation_day": 2,
+      "true_RSL": 10.0,
+      "metrics": {
+        "image_ensemble": {
+          "MAE": 1.373826959827641,
+          "RMSE": 1.3770621082324266,
+          "R2": null,
+          "MedAE": 1.3834355672200527,
+          "WithinHalfDay": 0.0,
+          "WithinOneDay": 0.0,
+          "n": 111
+        }
+      },
+      "single_head_MAE": [
+        1.0777,
+        1.1976,
+        1.7381,
+        1.3041,
+        0.9393,
+        1.9863
+      ]
+    },
+    "2": {
+      "held_out_samples": 647,
+      "validation_day": 3,
+      "true_RSL": 9.0,
+      "metrics": {
+        "image_ensemble": {
+          "MAE": 0.3959329738744689,
+          "RMSE": 0.46489600031679557,
+          "R2": null,
+          "MedAE": 0.358704249064127,
+          "WithinHalfDay": 0.7156105100463679,
+          "WithinOneDay": 0.9845440494590417,
+          "n": 647
+        }
+      },
+      "single_head_MAE": [
+        0.5852,
+        0.2882,
+        0.4263,
+        0.3777,
+        0.3851,
+        0.3487
+      ]
+    },
+    "3": {
+      "held_out_samples": 628,
+      "validation_day": 4,
+      "true_RSL": 8.0,
+      "metrics": {
+        "image_ensemble": {
+          "MAE": 0.21795555626510815,
+          "RMSE": 0.26263722812461543,
+          "R2": null,
+          "MedAE": 0.20139809449513724,
+          "WithinHalfDay": 0.9490445859872612,
+          "WithinOneDay": 1.0,
+          "n": 628
+        }
+      },
+      "single_head_MAE": [
+        0.5137,
+        0.2414,
+        0.1624,
+        0.6246,
+        0.4285,
+        0.4299
+      ]
+    },
+    "4": {
+      "held_out_samples": 327,
+      "validation_day": 5,
+      "true_RSL": 7.0,
+      "metrics": {
+        "image_ensemble": {
+          "MAE": 1.2034353288792445,
+          "RMSE": 1.221150311172375,
+          "R2": null,
+          "MedAE": 1.310262044270834,
+          "WithinHalfDay": 0.0,
+          "WithinOneDay": 0.23853211009174313,
+          "n": 327
+        }
+      },
+      "single_head_MAE": [
+        0.7409,
+        1.7447,
+        1.0585,
+        0.9986,
+        1.1482,
+        1.5297
+      ]
+    },
+    "5": {
+      "held_out_samples": 162,
+      "validation_day": 6,
+      "true_RSL": 6.0,
+      "metrics": {
+        "image_ensemble": {
+          "MAE": 0.3248160974479016,
+          "RMSE": 0.34704354462827136,
+          "R2": null,
+          "MedAE": 0.3199559847513833,
+          "WithinHalfDay": 0.9074074074074074,
+          "WithinOneDay": 1.0,
+          "n": 162
+        }
+      },
+      "single_head_MAE": [
+        0.3118,
+        1.2417,
+        0.6416,
+        0.5566,
+        0.5474,
+        0.2779
+      ]
+    },
+    "6": {
+      "held_out_samples": 653,
+      "validation_day": 7,
+      "true_RSL": 5.0,
+      "metrics": {
+        "image_ensemble": {
+          "MAE": 0.5335850187440866,
+          "RMSE": 0.6204150199357782,
+          "R2": null,
+          "MedAE": 0.6217169364293413,
+          "WithinHalfDay": 0.43797856049004597,
+          "WithinOneDay": 0.9739663093415007,
+          "n": 653
+        }
+      },
+      "single_head_MAE": [
+        0.4528,
+        1.2042,
+        0.8263,
+        1.1253,
+        0.6444,
+        2.0364
+      ]
+    },
+    "7": {
+      "held_out_samples": 360,
+      "validation_day": 9,
+      "true_RSL": 4.0,
+      "metrics": {
+        "image_ensemble": {
+          "MAE": 0.5705794478732127,
+          "RMSE": 0.7123439546345964,
+          "R2": null,
+          "MedAE": 0.46982053915659594,
+          "WithinHalfDay": 0.5138888888888888,
+          "WithinOneDay": 0.875,
+          "n": 360
+        }
+      },
+      "single_head_MAE": [
+        1.2884,
+        0.9123,
+        0.8165,
+        1.0005,
+        0.5849,
+        0.7089
+      ]
+    },
+    "9": {
+      "held_out_samples": 170,
+      "validation_day": 1,
+      "true_RSL": 2.0,
+      "metrics": {
+        "image_ensemble": {
+          "MAE": 2.163394502331229,
+          "RMSE": 2.168140586806216,
+          "R2": null,
+          "MedAE": 2.181928197542826,
+          "WithinHalfDay": 0.0,
+          "WithinOneDay": 0.0058823529411764705,
+          "n": 170
+        }
+      },
+      "single_head_MAE": [
+        1.6613,
+        2.7415,
+        1.9753,
+        2.4674,
+        2.1967,
+        1.9382
+      ]
+    }
+  },
+  "mean_MAE": {
+    "image_ensemble": 0.8479,
+    "single_head_average": 1.009
+  },
+  "runtime_seconds": 72.7
+}

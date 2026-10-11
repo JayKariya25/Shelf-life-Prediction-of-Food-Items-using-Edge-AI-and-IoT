@@ -1,0 +1,66 @@
+{
+  "rows_in_sensor_features": 3316,
+  "outlier_bounds": {
+    "Temperature": {
+      "lower": 27.455000000000002,
+      "upper": 29.334999999999997,
+      "n_outliers": 205,
+      "reproduces_Clean_max_abs_error": 7.105427357601002e-15
+    },
+    "Humidity": {
+      "lower": 52.55,
+      "upper": 62.63000000000001,
+      "n_outliers": 196,
+      "reproduces_Clean_max_abs_error": 7.105427357601002e-15
+    },
+    "Gas": {
+      "lower": 171.5,
+      "upper": 191.5,
+      "n_outliers": 80,
+      "reproduces_Clean_max_abs_error": 0.0
+    }
+  },
+  "rows_without_image": 249,
+  "images_on_disk": 3067,
+  "rows_dropped_nan_or_inf": 0,
+  "max_abs_corr_with_Day_among_inputs": {
+    "column": "Temperature_Gas_Interaction",
+    "value": 0.4985043563363391
+  },
+  "rows_final": 3067,
+  "day_counts": {
+    "1": 111,
+    "2": 647,
+    "3": 628,
+    "4": 327,
+    "5": 162,
+    "6": 653,
+    "7": 360,
+    "9": 170,
+    "10": 1,
+    "11": 8
+  },
+  "target_range": [
+    0.0,
+    10.0
+  ],
+  "embargoed_rows": {
+    "val": 282,
+    "test": 364
+  },
+  "embargo_minutes": 60,
+  "block_minutes": 180,
+  "split_counts": {
+    "blocked": {
+      "train": 1882,
+      "dropped": 646,
+      "test": 271,
+      "val": 268
+    },
+    "random": {
+      "train": 2148,
+      "val": 460,
+      "test": 459
+    }
+  }
+}

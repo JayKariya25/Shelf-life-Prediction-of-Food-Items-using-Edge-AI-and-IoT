@@ -11,8 +11,9 @@ split metadata.
 
 from __future__ import annotations
 
-import io
 import os
+import threading
+import time
 from typing import Any
 
 from flask import (
@@ -21,7 +22,7 @@ from flask import (
 
 from ..dataset import clear_cache, load_split, regression_metrics
 from ..db import execute, iso_now, query_all, query_one
-from ..multimodal import ModelUnavailable
+from ..rsl_model import ModelUnavailable, Reading
 from ..security import ROLES, admin_required, client_key, current_user, rate_limiter
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -45,14 +46,49 @@ def registry():
 
 
 def split():
-    return load_split(
-        current_app.config["DATASET_SPLITS_PATH"], current_app.config["DATASET_IMAGE_DIR"]
-    )
+    return load_split(current_app.config["RSL_BUNDLE_DIR"])
 
 
-def multimodal_or_none():
-    model = getattr(registry(), "multimodal", None)
+def rsl_or_none():
+    model = getattr(registry(), "rsl", None)
     return model if model is not None and model.available else None
+
+
+def model_unavailable_response():
+    status = registry().status()
+    return fail("model_unavailable",
+                status.get("trained_model_error") or "No trained model is loaded.", 503)
+
+
+# --- playground sessions -------------------------------------------------------
+# The fusion export's sensor features need a reading history, so the playground keeps one
+# per (admin, session name), in memory, like serve.py. It never touches tracked items.
+# The image-only ensemble has no such state, so its sessions carry no builder - the count
+# is still kept, because the page shows the readings that were entered alongside it.
+PLAYGROUND_TTL_SECONDS = 6 * 3600
+_playground: dict[tuple[int, str], dict] = {}
+_playground_lock = threading.Lock()
+
+
+def _playground_entry(user_id: int, name: str, model, reset: bool = False) -> dict:
+    now = time.time()
+    with _playground_lock:
+        for key in [k for k, v in _playground.items() if now - v["seen"] > PLAYGROUND_TTL_SECONDS]:
+            _playground.pop(key, None)
+        key = (user_id, name)
+        entry = _playground.get(key)
+        if entry is None or reset or entry["bundle"] != str(model.model_path):
+            entry = {"builder": None if model.image_only else model.new_builder(),
+                     "count": 0, "seen": now,
+                     "bundle": str(model.model_path), "lock": threading.Lock()}
+            _playground[key] = entry
+        entry["seen"] = now
+        return entry
+
+
+def clear_playground() -> None:
+    with _playground_lock:
+        _playground.clear()
 
 
 # --- pages -------------------------------------------------------------------
@@ -143,11 +179,11 @@ def runtime_info() -> dict[str, Any]:
         "database_path": config["DATABASE_PATH"],
         "upload_dir": config["UPLOAD_DIR"],
         "retention_days": config["READING_RETENTION_DAYS"],
-        "keras_model_path": config["KERAS_MODEL_PATH"],
-        "scaler_path": config["SCALER_PATH"],
-        "model_config_path": config["MODEL_CONFIG_PATH"],
-        "splits_path": config["DATASET_SPLITS_PATH"],
-        "image_dir": config["DATASET_IMAGE_DIR"],
+        "bundle_dir": config["RSL_BUNDLE_DIR"],
+        "model_file": config["RSL_MODEL_FILE"],
+        "max_photo_age_hours": config["RSL_MAX_PHOTO_AGE_HOURS"],
+        "min_reading_spacing_seconds": config["RSL_MIN_READING_SPACING_SECONDS"],
+        "device_report_interval_seconds": config["DEVICE_REPORT_INTERVAL_SECONDS"],
         "server_time": iso_now(),
     }
 
@@ -176,62 +212,119 @@ def platform_stats() -> dict[str, Any]:
 
 
 # --- admin API ---------------------------------------------------------------
+def _float_field(name: str) -> float:
+    raw = request.form.get(name)
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"'{name}' must be a number.")
+    if value != value or value in (float("inf"), float("-inf")):
+        raise ValueError(f"'{name}' must be finite.")
+    return value
+
+
 @bp.post("/api/predict")
 @admin_required
 def api_predict():
-    """Manual inference: an uploaded image plus the three sensor readings."""
+    """Manual inference: an uploaded photo plus one Temperature/Humidity/Gas reading.
+
+    Readings sent with the same ``session`` build up rolling history exactly as a
+    monitored batch would; ``reset=1`` starts that session over.
+    """
     user = current_user()
     allowed, retry_after = rate_limiter.check(client_key(f"admin-predict:{user['id']}"), 60, 60)
     if not allowed:
         return fail("rate_limited", "Too many inference runs. Wait a moment.", 429,
                     retry_after=retry_after)
 
-    model = multimodal_or_none()
+    model = rsl_or_none()
     if model is None:
-        status = registry().status()
-        return fail(
-            "model_unavailable",
-            status.get("trained_model_error") or "No trained model is loaded.",
-            503,
-        )
+        return model_unavailable_response()
 
     uploaded = request.files.get("image")
     if uploaded is None or not uploaded.filename:
         return fail("no_file", "Attach an image as the 'image' field.", 422)
 
-    readings = {}
-    for name in ("temperature", "humidity", "gas"):
-        raw = request.form.get(name)
-        try:
-            readings[name] = float(raw)
-        except (TypeError, ValueError):
-            return fail("invalid_sensor", f"'{name}' must be a number.", 422)
+    try:
+        temperature = _float_field("temperature")
+        humidity = _float_field("humidity")
+        gas = _float_field("gas")
+        minutes = float(request.form.get("minutes_since_previous") or 2.0)
+    except ValueError as exc:
+        return fail("invalid_sensor", str(exc), 422)
+    if not 0 <= minutes <= 24 * 60:
+        return fail("invalid_sensor", "minutes_since_previous must be between 0 and 1440.", 422)
+
+    session_name = (request.form.get("session") or "playground").strip()[:40] or "playground"
+    reset = request.form.get("reset") in {"1", "true", "on"}
 
     try:
-        image = model.open_image(io.BytesIO(uploaded.read()))
+        image = model.load_image_bytes(uploaded.read())
     except ValueError as exc:
         return fail("bad_image", str(exc), 415)
 
-    try:
-        output = model.predict(image, readings["temperature"], readings["humidity"], readings["gas"])
-    except ModelUnavailable as exc:
-        return fail("model_unavailable", str(exc), 503)
-    except Exception as exc:
-        current_app.logger.exception("Admin playground inference failed")
-        return fail("inference_failed", f"{type(exc).__name__}: {exc}", 500)
+    entry = _playground_entry(user["id"], session_name, model, reset=reset)
+    with entry["lock"]:
+        builder = entry["builder"]
+        # A failed call must not leave half-applied readings in the session, so the
+        # builder is restored from the snapshot taken before it.
+        snapshot = builder.state_dict() if builder is not None else None
+        hours = 0.0 if entry["count"] == 0 else minutes / 60.0
+
+        def restore() -> None:
+            if builder is not None:
+                entry["builder"] = model.builder_from_state(snapshot)
+
+        try:
+            result = model.predict(image, [Reading(temperature, humidity, gas, hours)],
+                                   builder=builder)
+        except ModelUnavailable as exc:
+            restore()
+            return fail("model_unavailable", str(exc), 503)
+        except Exception as exc:
+            restore()
+            current_app.logger.exception("Admin playground inference failed")
+            return fail("inference_failed", f"{type(exc).__name__}: {exc}", 500)
+        entry["count"] += 1
+        reading_number = entry["count"]
+
+    warnings = list(result.warnings)
+    if model.image_only:
+        warnings.insert(0, "The served model reads the photograph only, so the readings "
+                           "entered here are recorded for comparison but do not change "
+                           "this estimate.")
+    elif reading_number == 1:
+        warnings.insert(0, "First reading of this session: no rolling history yet, so the "
+                           "estimate leans almost entirely on the photo.")
 
     return ok(
         {
-            "predicted_days_raw": round(output.remaining_days, 4),
-            # Displayed value is floored at zero; the raw output is reported too
-            # so a negative regression can still be seen in the console.
-            "predicted_days": round(max(0.0, output.remaining_days), 4),
-            "clamped": output.remaining_days < 0,
-            "inference_ms": round(output.inference_ms, 2),
-            "sensor": readings,
+            "predicted_days": round(result.days, 4),
+            "predicted_days_raw": round(result.raw_days, 4),
+            "clamped": result.days != result.raw_days,
+            "inference_ms": round(result.inference_ms, 2),
+            "decoder": result.decoder,
+            "session": session_name,
+            "reading_number": reading_number,
+            "sensor": {"temperature": temperature, "humidity": humidity, "gas": gas,
+                       "minutes_since_previous": minutes if reading_number > 1 else 0.0},
+            "out_of_envelope": result.out_of_envelope,
+            "warnings": warnings,
+            "new_batch_mae_days": model.new_batch_mae_days,
             "model": {"name": model.name, "version": model.version},
         }
     )
+
+
+@bp.post("/api/playground/reset")
+@admin_required
+def api_playground_reset():
+    user = current_user()
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("session") or "playground").strip()[:40] or "playground"
+    with _playground_lock:
+        existed = _playground.pop((user["id"], name), None) is not None
+    return ok({"session": name, "existed": existed})
 
 
 @bp.get("/api/test-samples")
@@ -246,7 +339,9 @@ def api_test_samples():
             "samples": [
                 {
                     "index": index,
-                    "label": row["image_label"],
+                    "label": row["image_file"],
+                    "day": row["day"],
+                    "timestamp": row["timestamp"],
                     "temperature": row["temperature"],
                     "humidity": row["humidity"],
                     "gas": row["gas"],
@@ -276,43 +371,56 @@ def api_test_image(index: int):
     return send_file(path, max_age=300)
 
 
+def _score_row(model, held_out, row) -> tuple[float, float]:
+    """(raw prediction, inference ms) for a held-out row.
+
+    The fusion export is fed the row's stored sensor features; the image-only ensemble
+    takes the photograph on its own.
+    """
+    image = model.load_image_path(row["image_path"])
+    scaled = (None if model.image_only
+              else model.scale(held_out.vector(row, model.feature_names)))
+    started = time.perf_counter()
+    raw = model.predict_scaled(image.pixels, scaled)
+    return raw, (time.perf_counter() - started) * 1000.0
+
+
 @bp.post("/api/test-samples/<int:index>/predict")
 @admin_required
 def api_predict_test_sample(index: int):
-    model = multimodal_or_none()
+    model = rsl_or_none()
     if model is None:
-        status = registry().status()
-        return fail("model_unavailable",
-                    status.get("trained_model_error") or "No trained model is loaded.", 503)
+        return model_unavailable_response()
 
-    row = split().get(index)
+    held_out = split()
+    row = held_out.get(index)
     if row is None:
         return fail("not_found", "No held-out sample with that index.", 404)
     if not row["image_path"]:
-        return fail("image_missing", f"Image file not found for {row['image_label']}.", 404)
+        return fail("image_missing", f"Image file not found for {row['image_file']}.", 404)
 
     try:
-        image = model.open_image(row["image_path"])
-        output = model.predict(image, row["temperature"], row["humidity"], row["gas"])
-    except (ValueError, ModelUnavailable) as exc:
+        raw, elapsed = _score_row(model, held_out, row)
+    except (ValueError, KeyError, ModelUnavailable) as exc:
         return fail("inference_failed", str(exc), 503)
     except Exception as exc:
         current_app.logger.exception("Held-out inference failed")
         return fail("inference_failed", f"{type(exc).__name__}: {exc}", 500)
 
-    predicted = output.remaining_days
+    clamped = min(max(raw, 0.0), model.max_days)
     return ok(
         {
             "index": index,
-            "label": row["image_label"],
+            "label": row["image_file"],
+            "day": row["day"],
             "temperature": row["temperature"],
             "humidity": row["humidity"],
             "gas": row["gas"],
             "actual_days": round(row["actual"], 4),
-            "predicted_days_raw": round(predicted, 4),
-            "predicted_days": round(max(0.0, predicted), 4),
-            "absolute_error": round(abs(row["actual"] - predicted), 4),
-            "inference_ms": round(output.inference_ms, 2),
+            "predicted_days_raw": round(raw, 4),
+            "predicted_days": round(clamped, 4),
+            "absolute_error": round(abs(row["actual"] - raw), 4),
+            "inference_ms": round(elapsed, 2),
         }
     )
 
@@ -320,18 +428,16 @@ def api_predict_test_sample(index: int):
 @bp.post("/api/evaluate")
 @admin_required
 def api_evaluate():
-    """Run the model across the held-out split and report MAE, RMSE and R^2."""
+    """Score the held-out split and compare with the figures published at export."""
     user = current_user()
     allowed, retry_after = rate_limiter.check(client_key(f"admin-eval:{user['id']}"), 6, 300)
     if not allowed:
         return fail("rate_limited", "Evaluation is expensive. Wait a moment.", 429,
                     retry_after=retry_after)
 
-    model = multimodal_or_none()
+    model = rsl_or_none()
     if model is None:
-        status = registry().status()
-        return fail("model_unavailable",
-                    status.get("trained_model_error") or "No trained model is loaded.", 503)
+        return model_unavailable_response()
 
     held_out = split()
     if not held_out.available:
@@ -346,6 +452,7 @@ def api_evaluate():
 
     actual: list[float] = []
     predicted: list[float] = []
+    points: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     total_ms = 0.0
 
@@ -355,31 +462,37 @@ def api_evaluate():
             skipped.append({"index": index, "reason": "image file missing"})
             continue
         try:
-            image = model.open_image(row["image_path"])
-            output = model.predict(image, row["temperature"], row["humidity"], row["gas"])
+            raw, elapsed = _score_row(model, held_out, row)
         except Exception as exc:
             skipped.append({"index": index, "reason": f"{type(exc).__name__}: {exc}"})
             continue
         actual.append(row["actual"])
-        predicted.append(output.remaining_days)
-        total_ms += output.inference_ms
+        predicted.append(raw)
+        points.append({"actual": round(row["actual"], 4), "predicted": round(raw, 4),
+                       "day": row["day"]})
+        total_ms += elapsed
 
     metrics = regression_metrics(actual, predicted)
     evaluated = metrics["n"]
+    published = model.metrics.get("served_variant") or {}
     return ok(
         {
             "metrics": metrics,
             "evaluated": evaluated,
             "requested": limit,
+            "complete": evaluated == len(held_out),
             "skipped": skipped[:20],
             "skipped_count": len(skipped),
             "mean_inference_ms": round(total_ms / evaluated, 2) if evaluated else None,
-            "points": [
-                {"actual": round(a, 4), "predicted": round(p, 4)}
-                for a, p in zip(actual, predicted)
-            ],
-            # The figures published with the model, for comparison.
-            "reported_metrics": registry().status().get("multimodal", {}).get("metrics", {}),
+            "points": points,
+            "published": {
+                "variant": model.metrics.get("variant"),
+                "mae": published.get("MAE"),
+                "rmse": published.get("RMSE"),
+                "r2": published.get("R2"),
+                "n": published.get("n"),
+            },
+            "new_batch_mae_days": model.new_batch_mae_days,
         }
     )
 
@@ -387,19 +500,13 @@ def api_evaluate():
 @bp.post("/api/reload-model")
 @admin_required
 def api_reload_model():
-    """Re-read the artifacts from disk after dropping in a new export."""
-    from ..inference import PredictorRegistry
+    """Re-read the model bundle from disk after a retrain, without a restart."""
+    from .. import build_registry
 
-    config = current_app.config
-    current_app.extensions["predictors"] = PredictorRegistry(
-        model_path=config.get("MODEL_PATH", ""),
-        labels_path=config.get("MODEL_LABELS_PATH", ""),
-        keras_model_path=config.get("KERAS_MODEL_PATH", ""),
-        scaler_path=config.get("SCALER_PATH", ""),
-        config_path=config.get("MODEL_CONFIG_PATH", ""),
-    )
+    current_app.extensions["predictors"] = build_registry(current_app.config)
     clear_cache()
-    current_app.logger.info("Model artifacts reloaded by admin id=%s", current_user()["id"])
+    clear_playground()
+    current_app.logger.info("Model bundle reloaded by admin id=%s", current_user()["id"])
     return ok({"model": registry().status(), "dataset": split().summary()})
 
 

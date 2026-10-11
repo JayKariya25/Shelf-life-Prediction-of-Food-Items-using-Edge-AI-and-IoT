@@ -836,6 +836,10 @@ button.nav-link { cursor: pointer; }
 .sample-strip {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
     gap: 0.55rem;
+    /* A held-out split can run to hundreds of frames; keep the page a sane length. */
+    max-height: 420px;
+    overflow-y: auto;
+    padding-right: 0.3rem;
 }
 .sample-thumb {
     border: 2px solid transparent; border-radius: var(--radius);
@@ -858,3 +862,11 @@ button.nav-link { cursor: pointer; }
 }
 .drop-zone.is-over { border-color: var(--brand-500); background: var(--ok-bg); }
 .drop-zone img { max-height: 240px; margin: 0 auto; border-radius: var(--radius); }
+
+.model-notes {
+    margin: 0.55rem 0 0;
+    padding-left: 1.1rem;
+    color: var(--warn-fg);
+    font-size: 0.8rem;
+}
+.model-notes li + li { margin-top: 0.2rem; }

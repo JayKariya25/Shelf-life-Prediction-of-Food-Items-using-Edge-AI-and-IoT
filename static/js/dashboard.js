@@ -106,9 +106,8 @@ function renderItemCards(items) {
         if (remaining) remaining.textContent = item.remaining_display;
 
         const meter = card.querySelector(".meter__fill");
-        if (meter && item.remaining_hours !== null) {
-            const total = item.remaining_hours + item.hours_stored;
-            meter.style.width = `${total > 0 ? (item.remaining_hours / total) * 100 : 0}%`;
+        if (meter && typeof item.life_fraction === "number") {
+            meter.style.width = `${item.life_fraction * 100}%`;
             meter.className = `meter__fill meter__fill--${tone}`;
         }
 

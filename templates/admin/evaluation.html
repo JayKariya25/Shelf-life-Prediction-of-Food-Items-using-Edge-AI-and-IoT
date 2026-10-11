@@ -4,7 +4,7 @@
 
 {% block title %}Held-out evaluation{% endblock %}
 {% block page_title %}Held-out evaluation{% endblock %}
-{% block page_subtitle %}Samples the model was never fitted on{% endblock %}
+{% block page_subtitle %}The blocked test split: frames the model was never fitted on{% endblock %}
 
 {% block content %}
 <div class="stack">
@@ -17,7 +17,7 @@
             <div class="empty__icon">{{ icon('inbox', 46) }}</div>
             <h3>No held-out split available</h3>
             <p>{{ dataset.error }}</p>
-            <p class="small mono">{{ dataset.splits_path }}</p>
+            <p class="small mono">{{ dataset.master_path }}</p>
         </div>
     </div></section>
     {% else %}
@@ -38,11 +38,28 @@
         </div>
         <div class="card__body">
             <p class="small muted">
-                Runs the saved model over the <strong>{{ sample_count }}</strong> rows marked
-                <span class="mono">test</span> in the split metadata and computes the error against
-                the recorded <span class="mono">RemainingShelfLife</span>. Read-only: it does not
-                touch the model, the scaler or the split file.
+                Runs the served model over the <strong>{{ sample_count }}</strong> rows whose
+                <span class="mono">split_blocked</span> is <span class="mono">test</span>, using each
+                row's stored sensor features, and compares with the recorded
+                <span class="mono">RemainingShelfLife</span>. Read-only.
             </p>
+            <p class="small muted">
+                This is <em>within-session</em> error: the test frames come from the same 11-day run
+                as training. For a batch the model has never seen, expect about
+                <strong>{{ '%.2f' % model.rsl.new_batch_mae_days if model.rsl and model.rsl.new_batch_mae_days is not none else '?' }} days</strong>
+                (leave-one-day-out) &mdash; see the model card.
+            </p>
+            {% if dataset.rows_missing_images %}
+            <div class="banner banner--warn" style="margin-top:0.8rem">
+                {{ icon('warning', 17) }}
+                <div class="banner__body small">
+                    {{ dataset.rows_missing_images }} of {{ dataset.test_rows }} test rows have no image in
+                    <span class="mono">{{ dataset.image_dir }}</span> and will be skipped. The training
+                    images are not committed to git; copy <span class="mono">data_images/</span> in from
+                    the original model folder.
+                </div>
+            </div>
+            {% endif %}
             <div id="evalResults" style="margin-top:1rem">
                 <p class="small muted">No evaluation run yet.</p>
             </div>
@@ -53,12 +70,16 @@
         <section class="card">
             <div class="card__header">
                 {{ icon('image', 18) }}<h2>Sample browser</h2>
+                <span class="pill pill--muted" id="sampleCount">{{ sample_count }}</span>
                 <button class="btn btn--ghost btn--sm" id="randomSampleBtn">Random sample</button>
             </div>
             <div class="card__body">
                 <div class="sample-strip" id="sampleStrip">
                     <p class="small muted">Loading samples&hellip;</p>
                 </div>
+                <p class="tiny muted" style="margin-top:0.6rem">
+                    Scroll for the rest. Each tile shows the true remaining shelf life.
+                </p>
             </div>
         </section>
 

@@ -19,7 +19,7 @@ async function loadSamples() {
             .map(
                 (sample) => `
                 <button class="sample-thumb" data-index="${sample.index}"
-                        title="${escapeHtml(sample.label)} - actual ${sample.actual_days} days">
+                        title="${escapeHtml(sample.label)} - day ${sample.day}, ${sample.actual_days} days left">
                     ${sample.has_image
                         ? `<img src="/admin/api/test-samples/${sample.index}/image" alt="" loading="lazy">`
                         : '<span class="tiny muted">no image</span>'}
@@ -51,6 +51,7 @@ function renderSample() {
             : '<p class="small text-crit">Image file is missing for this row.</p>'}
         <dl class="kv">
             <dt>File</dt><dd class="mono tiny">${escapeHtml(sample.label)}</dd>
+            <dt>Captured</dt><dd class="tiny">${escapeHtml(sample.timestamp || "")} &middot; day ${sample.day}</dd>
             <dt>Temperature</dt><dd>${formatNumber(sample.temperature, 2)}</dd>
             <dt>Humidity</dt><dd>${formatNumber(sample.humidity, 2)}</dd>
             <dt>Gas</dt><dd>${formatNumber(sample.gas, 2)}</dd>
@@ -156,37 +157,49 @@ document.getElementById("runEvalBtn")?.addEventListener("click", async (event) =
     try {
         const data = await api("/admin/api/evaluate", { method: "POST", body: { limit } });
         const m = data.metrics;
-        const reported = data.reported_metrics || {};
-        const compare = (key, value) => {
-            const published = reported[`test_${key}`] ?? reported[key];
-            if (published === undefined || value === null) return "";
+        const pub = data.published || {};
+        const compare = (value, published) => {
+            if (published === undefined || published === null || value === null) return "";
             const delta = value - published;
-            return `<div class="stat__meta">published ${formatNumber(published, 3)} ` +
-                   `(${delta >= 0 ? "+" : ""}${formatNumber(delta, 3)})</div>`;
+            return `<div class="stat__meta">published ${formatNumber(published, 4)} ` +
+                   `(${delta >= 0 ? "+" : ""}${formatNumber(delta, 4)})</div>`;
         };
+        const reproduced = data.complete && pub.mae != null && Math.abs(m.mae - pub.mae) < 5e-4;
 
         results.innerHTML = `
+            ${data.complete
+                ? (reproduced
+                    ? `<div class="banner banner--ok" style="margin-bottom:0.9rem"><div class="banner__body small">
+                         Reproduced the published ${escapeHtml(pub.variant || "")} test MAE on all ${m.n} rows.</div></div>`
+                    : `<div class="banner banner--warn" style="margin-bottom:0.9rem"><div class="banner__body small">
+                         The measured MAE differs from the published figure. Check that the served export
+                         and the images match the ones the report was generated from.</div></div>`)
+                : `<div class="banner banner--info" style="margin-bottom:0.9rem"><div class="banner__body small">
+                     Partial run (${m.n} of ${config.count} rows), so the comparison with the published
+                     figure is only indicative.</div></div>`}
             <div class="grid grid--stats">
                 <div class="stat"><div class="stat__label">MAE</div>
-                    <div class="stat__value">${formatNumber(m.mae, 3)}<small>days</small></div>
-                    ${compare("mae", m.mae)}</div>
+                    <div class="stat__value">${formatNumber(m.mae, 4)}<small>days</small></div>
+                    ${compare(m.mae, pub.mae)}</div>
                 <div class="stat"><div class="stat__label">RMSE</div>
-                    <div class="stat__value">${formatNumber(m.rmse, 3)}<small>days</small></div>
-                    ${compare("rmse", m.rmse)}</div>
+                    <div class="stat__value">${formatNumber(m.rmse, 4)}<small>days</small></div>
+                    ${compare(m.rmse, pub.rmse)}</div>
                 <div class="stat"><div class="stat__label">R&sup2;</div>
-                    <div class="stat__value">${m.r2 === null ? "n/a" : formatNumber(m.r2, 3)}</div>
-                    ${m.r2 === null ? '<div class="stat__meta">actuals have zero variance</div>' : compare("r2", m.r2)}</div>
-                <div class="stat"><div class="stat__label">Samples</div>
-                    <div class="stat__value">${m.n}</div>
-                    <div class="stat__meta">${data.skipped_count} skipped</div></div>
+                    <div class="stat__value">${m.r2 === null ? "n/a" : formatNumber(m.r2, 4)}</div>
+                    ${m.r2 === null ? '<div class="stat__meta">actuals have zero variance</div>' : compare(m.r2, pub.r2)}</div>
+                <div class="stat"><div class="stat__label">Within 1 day</div>
+                    <div class="stat__value">${formatNumber(m.within_one_day * 100, 1)}<small>%</small></div>
+                    <div class="stat__meta">${formatNumber(m.within_half_day * 100, 1)}% within half a day</div></div>
             </div>
             <div class="grid grid--halves" style="margin-top:1rem">
                 ${scatter(data.points)}
                 <div>
                     <dl class="kv">
+                        <dt>Rows scored</dt><dd>${m.n} (${data.skipped_count} skipped)</dd>
                         <dt>Mean bias</dt><dd>${formatNumber(m.bias, 3)} days</dd>
                         <dt>Worst error</dt><dd>${formatNumber(m.max_error, 3)} days</dd>
-                        <dt>Mean inference</dt><dd>${formatNumber(data.mean_inference_ms, 1)} ms</dd>
+                        <dt>Mean inference</dt><dd>${formatNumber(data.mean_inference_ms, 2)} ms</dd>
+                        <dt>New-batch error</dt><dd>${data.new_batch_mae_days != null ? formatNumber(data.new_batch_mae_days, 3) + " days" : "--"}</dd>
                     </dl>
                     ${data.skipped_count
                         ? `<div class="banner banner--warn" style="margin-top:0.9rem">

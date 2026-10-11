@@ -1,0 +1,29 @@
+# --- core (pick the right TensorFlow for your platform automatically) ---
+tensorflow==2.20.0 ; sys_platform == "darwin"          # macOS, incl. Apple Silicon
+tensorflow-cpu==2.20.0 ; sys_platform != "darwin"      # Linux / Windows
+
+# Pinned: artifacts/sensor_scaler.pkl was pickled with 1.8.0. A newer release unpickles
+# it with an InconsistentVersionWarning ("might lead to breaking code or invalid results").
+scikit-learn==1.8.0
+pandas>=2.0
+numpy>=1.26
+matplotlib>=3.8
+pillow>=10.0
+# Decodes JPEGs bit-for-bit like tf.io.decode_jpeg (see scripts/image_io.py). Required on a
+# Raspberry Pi that runs tflite-runtime instead of TensorFlow; harmless elsewhere.
+simplejpeg>=1.7
+
+# --- web API (serve.py), so a website can call the model ---
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+
+# --- only needed to regenerate the notebooks (scripts/build_notebooks.py) ---
+nbformat>=5.9
+nbclient>=0.9
+ipykernel>=6.29
+
+# --- Raspberry Pi only: install these INSTEAD of tensorflow ---
+# tflite-runtime
+# simplejpeg
+# scikit-learn==1.8.0

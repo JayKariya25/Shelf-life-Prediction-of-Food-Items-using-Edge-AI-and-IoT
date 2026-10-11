@@ -1,0 +1,85 @@
+{
+  "split": "blocked",
+  "feature_set": "full",
+  "recommended_variant": "float16",
+  "keras_model_bytes": 5407513,
+  "calibration": {
+    "samples": 500,
+    "source": "train split only"
+  },
+  "keras_test_metrics": {
+    "MAE": 0.2662244274167557,
+    "RMSE": 0.6694171178487857,
+    "R2": 0.8703919791460086,
+    "MedAE": 0.14919710159301758,
+    "WithinHalfDay": 0.922509225092251,
+    "WithinOneDay": 0.9704797047970479,
+    "n": 271
+  },
+  "variants": {
+    "float32": {
+      "file": "fusion_blocked_full_float32.tflite",
+      "size_mb": 4.603,
+      "latency_ms_per_sample_x86_cpu": 1.8,
+      "cpu_backend": "xnnpack",
+      "metrics": {
+        "MAE": 0.26622344295037187,
+        "RMSE": 0.6694168130397303,
+        "R2": 0.8703920971761228,
+        "MedAE": 0.14919376373291016,
+        "WithinHalfDay": 0.922509225092251,
+        "WithinOneDay": 0.9704797047970479,
+        "n": 271
+      },
+      "max_abs_diff_vs_keras": 0.00013065338134765625
+    },
+    "float16": {
+      "file": "fusion_blocked_full_float16.tflite",
+      "size_mb": 2.34,
+      "latency_ms_per_sample_x86_cpu": 1.91,
+      "cpu_backend": "xnnpack",
+      "metrics": {
+        "MAE": 0.26358643713032626,
+        "RMSE": 0.6691382517955369,
+        "R2": 0.8704999409772525,
+        "MedAE": 0.15205621719360352,
+        "WithinHalfDay": 0.9261992619926199,
+        "WithinOneDay": 0.9704797047970479,
+        "n": 271
+      },
+      "max_abs_diff_vs_keras": 0.07023978233337402
+    },
+    "dynamic": {
+      "file": "fusion_blocked_full_dynamic.tflite",
+      "size_mb": 1.34,
+      "latency_ms_per_sample_x86_cpu": 3.05,
+      "cpu_backend": "xnnpack",
+      "metrics": {
+        "MAE": 0.5899984687016899,
+        "RMSE": 0.783994552175426,
+        "R2": 0.8222275976430469,
+        "MedAE": 0.5198764801025391,
+        "WithinHalfDay": 0.47601476014760147,
+        "WithinOneDay": 0.8487084870848709,
+        "n": 271
+      },
+      "max_abs_diff_vs_keras": 2.7074084281921387
+    },
+    "int8": {
+      "file": "fusion_blocked_full_int8.tflite",
+      "size_mb": 1.457,
+      "latency_ms_per_sample_x86_cpu": 10.15,
+      "cpu_backend": "reference_kernels",
+      "metrics": {
+        "MAE": 3.179298323458851,
+        "RMSE": 3.5863512974922562,
+        "R2": -2.7200082927480875,
+        "MedAE": 3.938079357147217,
+        "WithinHalfDay": 0.12177121771217712,
+        "WithinOneDay": 0.19557195571955718,
+        "n": 271
+      },
+      "max_abs_diff_vs_keras": 6.912630081176758
+    }
+  }
+}

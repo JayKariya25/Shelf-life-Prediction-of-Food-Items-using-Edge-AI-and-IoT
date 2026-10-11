@@ -1,0 +1,129 @@
+{
+  "image_size": [
+    224,
+    224
+  ],
+  "image_preprocessing": "none - raw 0-255 pixels; MobileNetV3 rescales inside the graph (mobilenet_v3.preprocess_input is the identity)",
+  "image_source": "224x224 RGB JPEG q95, LANCZOS (matches Image_Preprocessing config)",
+  "image_decoding": "tf.io.decode_jpeg defaults (fast integer IDCT, fancy upsampling); reproduced by scripts/image_io.py",
+  "input_envelope": {
+    "Temperature": {
+      "min": 25.83,
+      "max": 29.31,
+      "source": "raw readings, blocked train split"
+    },
+    "Humidity": {
+      "min": 53.07,
+      "max": 67.01,
+      "source": "raw readings, blocked train split"
+    },
+    "Gas": {
+      "min": 152.0,
+      "max": 193.0,
+      "source": "raw readings, blocked train split"
+    }
+  },
+  "target": {
+    "column": "RemainingShelfLife",
+    "definition": "11 - Day",
+    "unit": "days"
+  },
+  "sensor_features": {
+    "full": [
+      "Temperature",
+      "Humidity",
+      "Gas",
+      "Temperature_Smoothed",
+      "Humidity_Smoothed",
+      "Gas_Smoothed",
+      "Temperature_Change",
+      "Humidity_Change",
+      "Gas_Change",
+      "Temperature_Rate",
+      "Humidity_Rate",
+      "Gas_Rate",
+      "Temperature_Rolling_Mean",
+      "Humidity_Rolling_Mean",
+      "Gas_Rolling_Mean",
+      "Temperature_Rolling_STD",
+      "Humidity_Rolling_STD",
+      "Gas_Rolling_STD",
+      "Temperature_Humidity_Interaction",
+      "Temperature_Gas_Interaction",
+      "Humidity_Gas_Interaction",
+      "Temperature_From_Initial",
+      "Humidity_From_Initial",
+      "Gas_From_Initial",
+      "Gas_Increasing",
+      "Temperature_Increasing",
+      "Humidity_Increasing"
+    ],
+    "minimal": [
+      "Temperature",
+      "Humidity",
+      "Gas"
+    ]
+  },
+  "excluded_leakage_columns": [
+    "Sl_No",
+    "Day",
+    "Date",
+    "Timestamp",
+    "Year",
+    "Month",
+    "Day_Of_Month",
+    "Day_Of_Week",
+    "Elapsed_Time_Hours",
+    "Elapsed_Time_Days",
+    "Cumulative_Temperature",
+    "Cumulative_Humidity",
+    "Cumulative_Gas"
+  ],
+  "excluded_unreproducible_columns": [
+    "Temperature_Level_Ord",
+    "Humidity_Level_Ord",
+    "Gas_Level_Ord",
+    "Temperature_Trend",
+    "Humidity_Trend",
+    "Gas_Trend"
+  ],
+  "outlier_bounds": {
+    "Temperature": {
+      "lower": 27.455000000000002,
+      "upper": 29.334999999999997,
+      "n_outliers": 205,
+      "reproduces_Clean_max_abs_error": 7.105427357601002e-15
+    },
+    "Humidity": {
+      "lower": 52.55,
+      "upper": 62.63000000000001,
+      "n_outliers": 196,
+      "reproduces_Clean_max_abs_error": 7.105427357601002e-15
+    },
+    "Gas": {
+      "lower": 171.5,
+      "upper": 191.5,
+      "n_outliers": 80,
+      "reproduces_Clean_max_abs_error": 0.0
+    }
+  },
+  "smoothing_window": 5,
+  "split": {
+    "strategies": [
+      "blocked",
+      "random"
+    ],
+    "block_minutes": 180,
+    "embargo_minutes": 60,
+    "fractions": {
+      "train": 0.7,
+      "val": 0.15,
+      "test": 0.15
+    },
+    "seed": 42
+  },
+  "embedding_dims": {
+    "sensor": 64,
+    "image": 128
+  }
+}

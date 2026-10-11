@@ -54,10 +54,7 @@
             <strong data-field="remaining">{{ item.remaining_display }}</strong>
         </div>
 
-        {% set fraction = 0 %}
-        {% if item.remaining_hours is not none and item.remaining_hours_high %}
-            {% set fraction = (item.remaining_hours / (item.remaining_hours + item.hours_stored + 0.001)) %}
-        {% endif %}
+        {% set fraction = item.life_fraction or 0 %}
         <div class="meter" title="Share of modelled shelf life remaining">
             <div class="meter__fill meter__fill--{{ tone }}" style="width: {{ (fraction * 100) | round(1) }}%"></div>
         </div>
@@ -65,6 +62,11 @@
         {% if item.condition_flags %}
             <div class="tiny text-warn row row--tight">
                 {{ icon('warning', 13) }}<span>{{ item.condition_flags[0] }}</span>
+            </div>
+        {% endif %}
+        {% if item.model_kind == 'trained-model' %}
+            <div class="tiny text-ok row row--tight">
+                {{ icon('cpu', 12) }}<span>Trained model &middot; from photo and sensors</span>
             </div>
         {% endif %}
         {% if item.environment_source == 'nominal' %}
@@ -85,15 +87,17 @@
 {% endmacro %}
 
 {#- Model provenance. This is deliberately prominent: the app must never imply a
-    trained multimodal model is running when the kinetic baseline is. -#}
+    trained model is producing an estimate when the kinetic baseline is. -#}
 {% macro model_banner(model) %}
-{% if model.active_kind == 'trained-model' %}
+{% if model.trained_model_available %}
 <div class="banner banner--ok">
     {{ icon('cpu', 18) }}
     <div class="banner__body">
-        <div class="banner__title">Trained model active</div>
-        Predictions come from <strong>{{ model.active_model }}</strong> v{{ model.active_version }}
-        {% if model.uses_image %}using image plus sensor input{% else %}using sensor input{% endif %}.
+        <div class="banner__title">Trained shelf-life model active</div>
+        Items with a recent photo and live temperature, humidity and gas readings are
+        estimated by the <strong>{{ model.active_model }}</strong>. Anything else &mdash; no photo,
+        no gas sensor, or conditions outside the one room it was trained in &mdash; falls back to
+        the kinetic baseline, and the item page says which and why.
     </div>
 </div>
 {% else %}
@@ -101,11 +105,15 @@
     {{ icon('flask', 18) }}
     <div class="banner__body">
         <div class="banner__title">Baseline estimator active &mdash; not a trained model</div>
-        Estimates come from the <strong>{{ model.active_model }}</strong>, a temperature and
+        Estimates come from the <strong>{{ model.baseline_name }}</strong>, a temperature and
         humidity kinetic model. It does <strong>not</strong> use the camera image, and it
-        reports no calibrated confidence. Place the trained artifacts in
-        <span class="mono">models/</span> and <span class="mono">artifacts/</span> and the app
-        switches over on its own &mdash; see <span class="mono">models/README.md</span>.
+        reports no calibrated confidence.
+        {% if model.trained_model_configured %}
+        <span class="tiny" style="display:block;margin-top:0.3rem">
+            A trained model is configured but could not be loaded, so every estimate uses the
+            baseline. (The reason is shown to administrators in the developer console.)
+        </span>
+        {% endif %}
     </div>
 </div>
 {% endif %}

@@ -109,37 +109,49 @@ class BaseConfig:
     # live      -> never simulate; show "no data" when hardware is silent
     # simulated -> always simulate (useful for demos and UI work)
     SENSOR_SOURCE = os.environ.get("SENSOR_SOURCE", "auto").strip().lower()
-    # A device is considered online if it reported within this window.
-    DEVICE_ONLINE_SECONDS = as_int(os.environ.get("DEVICE_ONLINE_SECONDS"), 120)
+    # A device is considered online if it reported within this window. It must be
+    # comfortably longer than DEVICE_REPORT_INTERVAL_SECONDS, or a device reporting
+    # on schedule flickers offline between readings.
+    DEVICE_ONLINE_SECONDS = as_int(os.environ.get("DEVICE_ONLINE_SECONDS"), 300)
     # Readings older than this are pruned by the retention job.
     READING_RETENTION_DAYS = as_int(os.environ.get("READING_RETENTION_DAYS"), 30)
-    # How often the simulator materialises a new synthetic reading.
-    SIMULATOR_INTERVAL_SECONDS = as_int(os.environ.get("SIMULATOR_INTERVAL_SECONDS"), 30)
 
     # --- inference ---------------------------------------------------------
-    # Trained multimodal Keras model. These default to the standard project
-    # layout, so dropping the artifacts in place is enough to activate them; the
-    # app degrades to the kinetic baseline (and says so) while they are absent.
-    KERAS_MODEL_PATH = os.environ.get(
-        "KERAS_MODEL_PATH", str(BASE_DIR / "models" / "best_multimodal_model.keras")
+    # The trained multimodal Remaining-Shelf-Life model lives in ml/rsl_multimodal,
+    # alongside the pipeline that produced it, so retraining refreshes what the website
+    # serves. While it is absent the app serves the kinetic baseline and says so.
+    RSL_BUNDLE_DIR = os.environ.get(
+        "RSL_BUNDLE_DIR", str(BASE_DIR / "ml" / "rsl_multimodal")
     ).strip()
-    SCALER_PATH = os.environ.get(
-        "SCALER_PATH", str(BASE_DIR / "artifacts" / "sensor_scaler.pkl")
+    # The export the report recommends: float16 keeps float32 accuracy at half the size.
+    RSL_MODEL_FILE = os.environ.get(
+        "RSL_MODEL_FILE", "models/image_ensemble_blocked_full_float16.tflite"
     ).strip()
-    MODEL_CONFIG_PATH = os.environ.get(
-        "MODEL_CONFIG_PATH", str(BASE_DIR / "artifacts" / "config.json")
-    ).strip()
-    # Held-out split metadata, used by the admin evaluation console only.
-    DATASET_SPLITS_PATH = os.environ.get(
-        "DATASET_SPLITS_PATH", str(BASE_DIR / "artifacts" / "dataset_splits.csv")
-    ).strip()
-    DATASET_IMAGE_DIR = os.environ.get(
-        "DATASET_IMAGE_DIR", str(BASE_DIR / "data" / "Images")
-    ).strip()
+    # The model reads what the food looks like, so it needs a recent photograph. Older
+    # than this relative to the newest reading, the item falls back to the baseline.
+    RSL_MAX_PHOTO_AGE_HOURS = as_float(os.environ.get("RSL_MAX_PHOTO_AGE_HOURS"), 6.0)
+    # Which produce the trained model was actually fitted on. The dataset is a single
+    # 11-day banana run and has no food column at all, so the bundle cannot state this
+    # and the application must: a tomato photograph scored by a banana-only model would
+    # be a confident number about a food it has never seen. Items of any other produce
+    # fall back to the kinetic baseline, which is food-aware through FOOD_TYPE_SEED.
+    # Widen this only when the model has been retrained on that food's data.
+    RSL_TRAINED_FOOD_KEYS = tuple(
+        key.strip().lower()
+        for key in (os.environ.get("RSL_TRAINED_FOOD_KEYS") or "banana").split(",")
+        if key.strip()
+    )
+    # Training readings were 2 minutes apart (95% of gaps). A faster stream is thinned
+    # to this spacing before the rolling features are built, so a 5-reading window still
+    # spans ~10 minutes as it did in training.
+    RSL_MIN_READING_SPACING_SECONDS = as_int(
+        os.environ.get("RSL_MIN_READING_SPACING_SECONDS"), 90
+    )
 
-    # Optional TFLite export, kept for the Raspberry Pi deployment path.
-    MODEL_PATH = os.environ.get("MODEL_PATH", "").strip()
-    MODEL_LABELS_PATH = os.environ.get("MODEL_LABELS_PATH", "").strip()
+    # How often devices are asked to report (the agent reads this from the server).
+    DEVICE_REPORT_INTERVAL_SECONDS = as_int(
+        os.environ.get("DEVICE_REPORT_INTERVAL_SECONDS"), 120
+    )
 
     @classmethod
     def build(cls) -> dict:

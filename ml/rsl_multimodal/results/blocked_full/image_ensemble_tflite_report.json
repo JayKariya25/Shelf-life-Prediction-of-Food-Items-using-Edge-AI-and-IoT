@@ -1,0 +1,38 @@
+{
+  "model": "image_ensemble",
+  "split": "blocked",
+  "heads": 6,
+  "recommended": "float16",
+  "variants": {
+    "float32": {
+      "path": "image_ensemble_blocked_full_float32.tflite",
+      "size_mb": 8.076,
+      "metrics": {
+        "MAE": 0.14466998146028975,
+        "RMSE": 0.39334412628491905,
+        "R2": 0.9552509736565169,
+        "MedAE": 0.05495619773864746,
+        "WithinHalfDay": 0.9630996309963099,
+        "WithinOneDay": 0.9630996309963099,
+        "n": 271
+      },
+      "latency_ms_per_sample_x86_cpu": 2.18,
+      "delegate": "xnnpack"
+    },
+    "float16": {
+      "path": "image_ensemble_blocked_full_float16.tflite",
+      "size_mb": 4.081,
+      "metrics": {
+        "MAE": 0.1468109297136539,
+        "RMSE": 0.39500313925797886,
+        "R2": 0.9548727004339227,
+        "MedAE": 0.05483055114746094,
+        "WithinHalfDay": 0.9630996309963099,
+        "WithinOneDay": 0.9630996309963099,
+        "n": 271
+      },
+      "latency_ms_per_sample_x86_cpu": 1.77,
+      "delegate": "xnnpack"
+    }
+  }
+}

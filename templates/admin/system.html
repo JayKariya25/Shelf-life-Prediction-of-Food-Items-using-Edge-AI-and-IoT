@@ -44,11 +44,11 @@
                 <dl class="kv">
                     <dt>Database</dt><dd class="mono tiny">{{ runtime.database_path }}</dd>
                     <dt>Uploads</dt><dd class="mono tiny">{{ runtime.upload_dir }}</dd>
-                    <dt>Keras model</dt><dd class="mono tiny">{{ runtime.keras_model_path }}</dd>
-                    <dt>Scaler</dt><dd class="mono tiny">{{ runtime.scaler_path }}</dd>
-                    <dt>Model config</dt><dd class="mono tiny">{{ runtime.model_config_path }}</dd>
-                    <dt>Split metadata</dt><dd class="mono tiny">{{ runtime.splits_path }}</dd>
-                    <dt>Image directory</dt><dd class="mono tiny">{{ runtime.image_dir }}</dd>
+                    <dt>Model bundle</dt><dd class="mono tiny">{{ runtime.bundle_dir }}</dd>
+                    <dt>Served export</dt><dd class="mono tiny">{{ runtime.model_file }}</dd>
+                    <dt>Photo must be under</dt><dd>{{ '%g' % runtime.max_photo_age_hours }} h old</dd>
+                    <dt>Reading spacing</dt><dd>&ge; {{ runtime.min_reading_spacing_seconds }} s (training: 120 s)</dd>
+                    <dt>Device report interval</dt><dd>{{ runtime.device_report_interval_seconds }} s</dd>
                 </dl>
             </div>
         </section>

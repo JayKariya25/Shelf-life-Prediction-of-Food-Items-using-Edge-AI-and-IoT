@@ -11,6 +11,7 @@ genuine hardware samples, never inflated by the demo simulator.
 
 from __future__ import annotations
 
+import json
 import math
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -325,6 +326,70 @@ def environment_segments(
     return segments
 
 
+def rsl_history_for_item(user_id: int, item: dict[str, Any], since: datetime, until: datetime):
+    """The item's live readings with all three channels, oldest first.
+
+    Returns ``(readings, newest_reading_time)``. Readings come from the device linked to
+    the item when there is one, otherwise from the owner's live stream. A stream faster
+    than the training cadence (2 minutes) is thinned to
+    ``RSL_MIN_READING_SPACING_SECONDS`` so a 5-reading rolling window still spans about
+    ten minutes, as it did in training.
+    """
+    from .rsl_model import Reading
+
+    if sensor_mode(user_id) != "live":
+        return [], None
+    params: list[Any] = [
+        user_id,
+        since.replace(microsecond=0).isoformat(),
+        until.replace(microsecond=0).isoformat(),
+    ]
+    device_clause = ""
+    if item.get("device_id"):
+        device_clause = " AND device_id = ?"
+        params.append(item["device_id"])
+    rows = query_all(
+        f"""
+        SELECT recorded_at, temperature_c, humidity_pct, gas_ppm
+        FROM readings
+        WHERE user_id = ? AND source = 'live' AND recorded_at >= ? AND recorded_at <= ?
+          AND temperature_c IS NOT NULL AND humidity_pct IS NOT NULL AND gas_ppm IS NOT NULL
+          {device_clause}
+        ORDER BY recorded_at ASC, id ASC
+        """,
+        params,
+    )
+    spacing = float(current_app.config.get("RSL_MIN_READING_SPACING_SECONDS", 90))
+    history = []
+    previous = None
+    for row in rows:
+        stamp = parse_ts(row["recorded_at"])
+        if stamp is None:
+            continue
+        if previous is not None and (stamp - previous).total_seconds() < spacing:
+            continue
+        hours = 0.0 if previous is None else (stamp - previous).total_seconds() / 3600.0
+        history.append(Reading(float(row["temperature_c"]), float(row["humidity_pct"]),
+                               float(row["gas_ppm"]), hours))
+        previous = stamp
+    return history, previous
+
+
+def photo_age_hours(item: dict[str, Any], reference: datetime | None) -> float | None:
+    """Hours between the item's photograph and the reading it is paired with."""
+    if not item.get("image_path"):
+        return None
+    taken = parse_ts(item.get("image_captured_at"))
+    if taken is None:
+        # Items photographed before capture times were recorded: use the file's time.
+        path = resolve_upload(item.get("image_path"))
+        if path is None:
+            return None
+        taken = datetime.fromtimestamp(Path(path).stat().st_mtime, tz=utcnow().tzinfo)
+    reference = reference or utcnow()
+    return abs((reference - taken).total_seconds()) / 3600.0
+
+
 def record_live_reading(
     user_id: int, device_id: int | None, item_id: int | None, cleaned: dict[str, Any]
 ) -> int:
@@ -403,20 +468,25 @@ def create_item(
         """
         INSERT INTO items (
             user_id, food_type_id, device_id, label, quantity, storage,
-            stored_at, status, image_path, notes, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)
+            stored_at, status, image_path, image_captured_at, notes, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
         """,
         (
             user_id, food_type_id, device_id, label, quantity, storage,
-            stored_at, image_path, notes, now, now,
+            stored_at, image_path, now if image_path else None, notes, now, now,
         ),
     )
     return int(cursor.lastrowid)
 
 
 def update_item(user_id: int, item_id: int, fields: dict[str, Any]) -> bool:
-    allowed = {"label", "quantity", "storage", "stored_at", "notes", "food_type_id", "image_path"}
+    allowed = {"label", "quantity", "storage", "stored_at", "notes", "food_type_id",
+               "image_path", "image_captured_at", "device_id"}
     updates = {key: value for key, value in fields.items() if key in allowed}
+    # A new photograph restarts the clock the trained model checks, unless the caller
+    # (a device capture) supplied the real capture time.
+    if "image_path" in updates and "image_captured_at" not in updates:
+        updates["image_captured_at"] = iso_now() if updates["image_path"] else None
     if not updates:
         return False
     assignments = ", ".join(f"{key} = ?" for key in updates)
@@ -457,6 +527,11 @@ def build_context(user_id: int, item: dict[str, Any], reading: dict[str, Any]) -
     stored_at = parse_ts(item["stored_at"]) or utcnow()
     now = utcnow()
     hours_stored = max(0.0, (now - stored_at).total_seconds() / 3600.0)
+    image_path = resolve_upload(item.get("image_path"))
+    rsl_history, newest = (
+        rsl_history_for_item(user_id, item, stored_at, now)
+        if reading.get("environment_source") != "nominal" else ([], None)
+    )
     return PredictionContext(
         food_key=item["food_key"],
         food_name=item["food_name"],
@@ -472,7 +547,9 @@ def build_context(user_id: int, item: dict[str, Any], reading: dict[str, Any]) -
         gas_ppm=reading.get("gas_ppm"),
         hours_stored=hours_stored,
         image_path=item.get("image_path"),
-        image_full_path=resolve_upload(item.get("image_path")),
+        image_full_path=image_path,
+        image_age_hours=photo_age_hours(item, newest) if image_path else None,
+        rsl_history=rsl_history,
         history=segments_for_item(user_id, item, reading, stored_at, now),
     )
 
@@ -491,8 +568,9 @@ def run_prediction(user_id: int, item: dict[str, Any], reading: dict[str, Any] |
             user_id, item_id, created_at, freshness_class, freshness_confidence,
             remaining_hours, remaining_hours_low, remaining_hours_high,
             model_name, model_version, model_kind, inference_ms,
-            temperature_c, humidity_pct, gas_ppm, image_path, rationale, fallback_reason
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            temperature_c, humidity_pct, gas_ppm, image_path, rationale, fallback_reason,
+            notes, model_inputs
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             user_id, item["id"], iso_now(), prediction.freshness_class,
@@ -502,6 +580,8 @@ def run_prediction(user_id: int, item: dict[str, Any], reading: dict[str, Any] |
             prediction.inference_ms, reading.get("temperature_c"),
             reading.get("humidity_pct"), reading.get("gas_ppm"),
             item.get("image_path"), prediction.rationale, prediction.fallback_reason,
+            json.dumps(prediction.notes) if prediction.notes else None,
+            prediction.model_inputs or None,
         ),
     )
     payload = prediction.to_dict()
@@ -674,6 +754,29 @@ def format_duration(hours: float | None) -> str:
     return f"{days:.1f} days"
 
 
+def _life_fraction(prediction, remaining: float | None, hours_stored: float) -> float | None:
+    if not prediction or remaining is None:
+        return None
+    if prediction.get("model_kind") == "trained-model":
+        registry = current_app.extensions["predictors"]
+        max_days = registry.rsl.max_days if registry.rsl is not None else 11.0
+        return round(max(0.0, min(1.0, remaining / (max_days * 24.0))), 4)
+    total = remaining + max(0.0, hours_stored)
+    return round(remaining / total, 4) if total > 0 else 0.0
+
+
+def _parse_notes(raw) -> list[str]:
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return raw
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    return value if isinstance(value, list) else []
+
+
 def format_remaining(hours: float | None) -> str:
     """One ready-to-render phrase, so the UI never has to assemble wording.
 
@@ -720,6 +823,7 @@ def summarise_item(
 
     remaining = prediction["remaining_hours"] if prediction else None
     freshness = prediction["freshness_class"] if prediction else "Unknown"
+    life_fraction = _life_fraction(prediction, remaining, hours_stored)
     level = alert_level_for(remaining, freshness, threshold_hours) if prediction else "ok"
 
     return {
@@ -761,6 +865,9 @@ def summarise_item(
         "model_name": prediction["model_name"] if prediction else None,
         "rationale": prediction["rationale"] if prediction else None,
         "fallback_reason": (prediction["fallback_reason"] if prediction else None),
+        "model_notes": _parse_notes(prediction.get("notes") if prediction else None),
+        "image_captured_at": item.get("image_captured_at"),
+        "device_id": item.get("device_id"),
         "predicted_at": prediction["created_at"] if prediction else None,
         # Only warn about conditions that were actually measured. A nominal
         # profile is this application's own assumption, so flagging the user for
@@ -777,6 +884,9 @@ def summarise_item(
         "remaining_display": (
             format_remaining(remaining) if prediction else "No estimate"
         ),
+        # Share of the modelled life still left, 0-1, for meters and gauges. Matches how
+        # the freshness class was derived for whichever estimator produced it.
+        "life_fraction": life_fraction,
     }
 
 

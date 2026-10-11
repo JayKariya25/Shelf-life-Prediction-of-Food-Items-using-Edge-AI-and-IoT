@@ -1,0 +1,8 @@
+{
+  "decoder": "tensorflow",
+  "originals_checked": 60,
+  "originals_bit_identical": 60,
+  "served_test_mae": 0.2635864600044335,
+  "recorded_test_mae": 0.26358643713032626,
+  "passed": true
+}

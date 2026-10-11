@@ -49,8 +49,13 @@
                             <p class="small muted" id="rangeLine">
                                 Modelling range {{ item.remaining_hours_low | duration }} &ndash;
                                 {{ item.remaining_hours_high | duration }}
+                                {% if item.model_kind == 'trained-model' %}
+                                <span class="tag" title="The model's mean absolute error on monitoring days it
+                                       never saw in training - a measured figure, not an assumption">measured on unseen days</span>
+                                {% else %}
                                 <span class="tag" title="The baseline reports a fixed +/-35% band, which is a stated
                                        modelling assumption rather than a measured error bar">assumed band</span>
+                                {% endif %}
                             </p>
                             {% endif %}
 
@@ -71,6 +76,16 @@
                         </div>
                     </div>
 
+                    {% if item.fallback_reason %}
+                    <div class="banner banner--info" style="margin-top:1rem" id="fallbackBanner">
+                        {{ icon('info', 17) }}
+                        <div class="banner__body small">
+                            <div class="banner__title">Why the trained model was not used</div>
+                            {{ item.fallback_reason }}
+                        </div>
+                    </div>
+                    {% endif %}
+
                     {% if prediction and prediction.rationale %}
                     <hr class="divider">
                     <div class="small">
@@ -78,10 +93,24 @@
                             {{ icon('flask', 15) }} How this was calculated
                         </div>
                         <p class="muted" id="rationaleText">{{ prediction.rationale }}</p>
+
+                        {% if item.model_notes %}
+                        <ul class="model-notes" id="modelNotes">
+                            {% for note in item.model_notes %}
+                            <li>{{ note }}</li>
+                            {% endfor %}
+                        </ul>
+                        {% endif %}
+
                         <p class="tiny muted" style="margin-top:0.5rem">
-                            {{ prediction.model_name }} v{{ prediction.model_version }}
+                            {% if prediction.model_kind == 'trained-model' %}
+                                <span class="pill pill--ok">Trained model</span>
+                            {% else %}
+                                <span class="pill pill--warn">Kinetic baseline</span>
+                            {% endif %}
+                            {{ prediction.model_name }} &middot; {{ prediction.model_version }}
                             &middot; {{ '%.1f' % (prediction.inference_ms or 0) }} ms
-                            &middot; {{ 'image + sensors' if prediction.model_kind == 'trained-model' else 'sensors only, image not used' }}
+                            &middot; {{ prediction['model_inputs'] or ('photo + sensor history' if prediction.model_kind == 'trained-model' else 'temperature and humidity only; the photo is not used') }}
                             &middot; run <span data-relative="{{ prediction.created_at }}"></span>
                         </p>
                     </div>
@@ -158,6 +187,10 @@
                             {% else %}&mdash;{% endif %}
                         </dd>
                         <dt>Stored since</dt><dd>{{ item.stored_at | localtime }}</dd>
+                        {% if item.image_path %}
+                        <dt>Photo taken</dt>
+                        <dd>{% if item.image_captured_at %}<span data-relative="{{ item.image_captured_at }}"></span>{% else %}unknown{% endif %}</dd>
+                        {% endif %}
                         <dt>Age</dt><dd>{{ item.days_stored }} days</dd>
                         <dt>Ideal temp</dt>
                         <dd>{% if item.ideal_temp_min_c is not none %}{{ item.ideal_temp_min_c | round | int }}&ndash;{{ item.ideal_temp_max_c | round | int }} &deg;C{% else %}&mdash;{% endif %}</dd>

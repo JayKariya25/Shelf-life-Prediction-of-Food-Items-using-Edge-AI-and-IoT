@@ -458,3 +458,63 @@ class ProduceScope(AppTestCase):
         self.assertNotIn("durian", report["pruned_food_types"])
         with self.app.app_context():
             self.assertIsNotNone(query_one("SELECT 1 FROM food_types WHERE key='durian'"))
+
+
+class AccountDeletion(AppTestCase):
+    """Deleting a user must cascade, not fail on a foreign key."""
+
+    def test_deleting_a_user_removes_everything_they_own(self):
+        from shelflife import db as db_module
+
+        self.register_and_login()
+        item = self.create_item()
+        with self.app.app_context():
+            services.raise_alert(1, item["id"], "critical", "T", "B")
+            conn = db_module.get_db()
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("DELETE FROM users WHERE id = 1")
+            for table in ("settings", "items", "predictions", "alerts"):
+                self.assertEqual(
+                    query_one(f"SELECT COUNT(*) AS n FROM {table}")["n"], 0, table)
+
+    def test_a_legacy_settings_table_is_rebuilt_with_cascade(self):
+        """The prototype created settings without ON DELETE CASCADE."""
+        import sqlite3
+        import tempfile
+        from pathlib import Path
+        from shelflife import db as db_module
+
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, tmp, True)
+        path = str(tmp / "legacy.db")
+        conn = sqlite3.connect(path)
+        conn.execute("""CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE, mobile TEXT UNIQUE,
+            password_hash TEXT NOT NULL, created_at TEXT NOT NULL)""")
+        conn.execute("""CREATE TABLE settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER UNIQUE NOT NULL,
+            email_notifications INTEGER DEFAULT 0, sms_notifications INTEGER DEFAULT 0,
+            alert_days_before INTEGER DEFAULT 2, latest_image TEXT,
+            FOREIGN KEY (user_id) REFERENCES users (id))""")
+        conn.execute("INSERT INTO users (email, password_hash, created_at) VALUES ('a@b.c','x','t')")
+        conn.execute("INSERT INTO settings (user_id, alert_days_before) VALUES (1, 7)")
+        conn.commit()
+        conn.close()
+
+        report = db_module.init_db(path)
+        self.assertTrue(report["rebuilt_settings"])
+
+        conn = sqlite3.connect(path)
+        conn.execute("PRAGMA foreign_keys = ON")
+        sql = conn.execute("SELECT sql FROM sqlite_master WHERE name='settings'").fetchone()[0]
+        self.assertIn("ON DELETE CASCADE", sql)
+        # the preference survived the rebuild, and the user can now be deleted
+        self.assertEqual(conn.execute("SELECT alert_days_before FROM settings").fetchone()[0], 7)
+        conn.execute("DELETE FROM users WHERE id = 1")
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM settings").fetchone()[0], 0)
+        conn.close()
+
+    def test_the_rebuild_runs_only_once(self):
+        from shelflife import db as db_module
+
+        self.assertFalse(db_module.init_db(self.app.config["DATABASE_PATH"])["rebuilt_settings"])

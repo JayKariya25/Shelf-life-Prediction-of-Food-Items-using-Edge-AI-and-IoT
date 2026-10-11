@@ -1,24 +1,21 @@
 # --- web application ---------------------------------------------------------
-# Runs on any Python 3.10+. This is all you need for the monitoring interface
-# with the Q10 kinetic baseline.
+# Runs on any Python 3.10+. This is all the monitoring interface needs to serve the
+# kinetic baseline estimator.
 Flask>=3.0,<4.0
 
-# --- trained multimodal model (optional) -------------------------------------
-# Needed only to serve models/best_multimodal_model.keras.
-#
-#   IMPORTANT: TensorFlow publishes no wheel for Python 3.14. Create a separate
-#   environment on Python 3.12 and install requirements-model.txt there:
+# --- the trained shelf-life model (optional) ---------------------------------
+# To serve ml/rsl_multimodal, use requirements-model.txt in a Python 3.12
+# environment - TensorFlow publishes no wheel for Python 3.14:
 #
 #       python3.12 -m venv .venv-model
 #       .venv-model/bin/pip install -r requirements-model.txt
-#       .venv-model/bin/python app.py
+#       sh tools/serve.sh
 #
-# See requirements-model.txt.
+# To retrain the model, use ml/rsl_multimodal/requirements.txt instead.
 
 # --- Raspberry Pi (optional) -------------------------------------------------
 # Sensor drivers for tools/pi_agent.py:
 #   adafruit-circuitpython-bmp280
 #   adafruit-circuitpython-sht31d
-#
-# Production WSGI server (do not use Flask's dev server on the Pi):
-#   waitress
+# To serve the model on the Pi itself, install tflite-runtime, simplejpeg,
+# numpy, pillow and scikit-learn==1.8.0 instead of tensorflow.

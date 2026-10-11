@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Raspberry Pi agent: read the sensors, post them to the dashboard.
+"""Raspberry Pi agent: read the sensors and camera, post them to the dashboard.
 
 Runs on the Pi itself. Uses only the standard library for networking so it needs
 no extra packages beyond the sensor drivers.
@@ -8,15 +8,28 @@ Setup on the Pi::
 
     sudo apt install python3-smbus i2c-tools
     pip install adafruit-circuitpython-bmp280 adafruit-circuitpython-sht31d
-    export SHELFLIFE_URL=http://192.168.1.50:5000
+    export SHELFLIFE_URL=http://192.168.1.50:8000
     export SHELFLIFE_TOKEN=slp_...            # from the Device & Model page
     python3 tools/pi_agent.py
 
-Without the sensor libraries installed it runs in ``--dry-run`` mode and reports
-nothing, rather than inventing numbers.
+For the trained shelf-life model the website also needs, per tracked item:
+
+* **gas readings** - set ``SHELFLIFE_GAS_COMMAND`` to a command that prints one number:
+  the gas sensor's value in the *same units your training rig recorded* (roughly
+  150-195 during the training run). The agent does not guess a driver or a scale,
+  because a mis-scaled value silently puts every prediction outside what the model
+  knows. Example: ``SHELFLIFE_GAS_COMMAND="python3 /home/pi/read_gas.py"``.
+* **photos** - set ``SHELFLIFE_ITEM_ID`` to the item being watched. A frame is taken
+  every ``--capture-every`` minutes (default 30) with ``SHELFLIFE_CAPTURE_COMMAND``,
+  whose ``{path}`` placeholder is replaced by the file to write. By default it tries
+  ``rpicam-still`` and then ``libcamera-still``.
+
+Without the sensor libraries it exits rather than inventing numbers.
 
 Readings are buffered to disk when the network is down and flushed as a batch
-once it comes back, so a dropped Wi-Fi link does not create holes in the data.
+once it comes back, so a dropped Wi-Fi link does not create holes in the data. The
+server tells the agent how often to report (every 2 minutes - the cadence the model
+was trained on).
 """
 
 from __future__ import annotations
@@ -24,17 +37,23 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
+import shlex
+import shutil
 import signal
+import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 LOG = logging.getLogger("pi-agent")
-FIRMWARE = "pi-agent/1.0"
+FIRMWARE = "pi-agent/1.1"
 BUFFER_PATH = Path.home() / ".shelflife-buffer.jsonl"
 MAX_BUFFER_ROWS = 2000
 
@@ -176,11 +195,87 @@ def flush_buffer(uploader: Uploader) -> None:
     BUFFER_PATH.unlink(missing_ok=True)
 
 
+def read_gas(command: str, timeout: float = 10.0) -> float | None:
+    """Run the configured gas command and parse one finite number from its output."""
+    try:
+        done = subprocess.run(shlex.split(command), capture_output=True, text=True,
+                              timeout=timeout, check=True)
+    except (OSError, subprocess.SubprocessError) as exc:
+        LOG.warning("Gas command failed: %s", exc)
+        return None
+    text = done.stdout.strip().split()
+    try:
+        value = float(text[-1]) if text else float("nan")
+    except ValueError:
+        value = float("nan")
+    if not math.isfinite(value):
+        LOG.warning("Gas command printed %r, not a number", done.stdout.strip()[:80])
+        return None
+    return value
+
+
+def default_capture_command() -> str | None:
+    for tool in ("rpicam-still", "libcamera-still"):
+        if shutil.which(tool):
+            return f"{tool} -n -t 1000 -o {{path}}"
+    return None
+
+
+def capture_frame(command: str, timeout: float = 30.0) -> Path | None:
+    """Take one photo with the configured command. Returns the file, or None."""
+    target = Path(tempfile.gettempdir()) / f"shelflife-{uuid.uuid4().hex}.jpg"
+    try:
+        subprocess.run(shlex.split(command.replace("{path}", str(target))),
+                       capture_output=True, timeout=timeout, check=True)
+    except (OSError, subprocess.SubprocessError) as exc:
+        LOG.warning("Capture command failed: %s", exc)
+        target.unlink(missing_ok=True)
+        return None
+    if not target.is_file() or target.stat().st_size == 0:
+        LOG.warning("Capture command produced no file")
+        target.unlink(missing_ok=True)
+        return None
+    return target
+
+
+def upload_capture(uploader: "Uploader", path: Path, item_id: str, captured_at: str) -> dict:
+    """POST a frame as multipart/form-data using only the standard library."""
+    boundary = uuid.uuid4().hex
+    parts = []
+    for name, value in (("item_id", item_id), ("captured_at", captured_at)):
+        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode())
+    parts.append(
+        f'--{boundary}\r\nContent-Disposition: form-data; name="image"; filename="frame.jpg"\r\n'
+        f"Content-Type: image/jpeg\r\n\r\n".encode()
+        + path.read_bytes() + b"\r\n"
+    )
+    parts.append(f"--{boundary}--\r\n".encode())
+    request = urllib.request.Request(
+        f"{uploader.base_url}/api/device/v1/captures",
+        data=b"".join(parts),
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
+                 "Authorization": f"Bearer {uploader.token}", "User-Agent": FIRMWARE},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=uploader.timeout * 3) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--url", default=os.environ.get("SHELFLIFE_URL", "http://127.0.0.1:5000"))
+    parser.add_argument("--url", default=os.environ.get("SHELFLIFE_URL", "http://127.0.0.1:8000"))
     parser.add_argument("--token", default=os.environ.get("SHELFLIFE_TOKEN", ""))
-    parser.add_argument("--interval", type=float, default=float(os.environ.get("SHELFLIFE_INTERVAL", "30")))
+    parser.add_argument("--interval", type=float, default=float(os.environ.get("SHELFLIFE_INTERVAL", "120")),
+                        help="seconds between readings; the server's value overrides this")
+    parser.add_argument("--gas-command", default=os.environ.get("SHELFLIFE_GAS_COMMAND", ""),
+                        help="command that prints one gas value in training units")
+    parser.add_argument("--item-id", default=os.environ.get("SHELFLIFE_ITEM_ID", ""),
+                        help="tracked item to attach readings and photos to")
+    parser.add_argument("--capture-command", default=os.environ.get("SHELFLIFE_CAPTURE_COMMAND", ""),
+                        help="camera command with a {path} placeholder")
+    parser.add_argument("--capture-every", type=float,
+                        default=float(os.environ.get("SHELFLIFE_CAPTURE_EVERY_MINUTES", "30")),
+                        help="minutes between photos (the model needs one under 6 hours old)")
     parser.add_argument("--once", action="store_true", help="Send a single reading and exit.")
     parser.add_argument("--dry-run", action="store_true", help="Read sensors and print, do not upload.")
     args = parser.parse_args()
@@ -215,6 +310,14 @@ def main() -> int:
         except (urllib.error.URLError, OSError) as exc:
             LOG.warning("Server unreachable at startup (%s); buffering locally.", exc)
 
+    capture_command = args.capture_command or (default_capture_command() if args.item_id else None)
+    if args.item_id and not capture_command:
+        LOG.warning("SHELFLIFE_ITEM_ID is set but no camera command was found; photos are off")
+    if not args.gas_command:
+        LOG.warning("No SHELFLIFE_GAS_COMMAND: readings carry no gas value, so the website "
+                    "will use its kinetic baseline instead of the trained model")
+    last_capture = 0.0
+
     running = True
 
     def stop(signum, frame):  # noqa: ARG001
@@ -227,6 +330,12 @@ def main() -> int:
 
     while running:
         reading = bus.read()
+        if reading and args.gas_command:
+            gas = read_gas(args.gas_command)
+            if gas is not None:
+                reading["gas_ppm"] = gas
+        if reading and args.item_id:
+            reading["item_id"] = int(args.item_id)
         if not reading:
             LOG.warning("Sensor read produced nothing; skipping this cycle")
         else:
@@ -238,15 +347,30 @@ def main() -> int:
                     flush_buffer(uploader)
                     uploader.send(reading)
                     LOG.info(
-                        "Sent %.1f C / %.0f%% RH",
+                        "Sent %.2f C / %.1f%% RH / gas %s",
                         reading.get("temperature_c", float("nan")),
                         reading.get("humidity_pct", float("nan")),
+                        reading.get("gas_ppm", "-"),
                     )
                 except urllib.error.HTTPError as exc:
                     LOG.error("Server refused the reading (HTTP %s): %s", exc.code, exc.read()[:200])
                 except (urllib.error.URLError, OSError) as exc:
                     LOG.warning("Upload failed (%s); buffering", exc)
                     buffer_reading(reading)
+
+        if capture_command and args.item_id and not args.dry_run \
+                and time.monotonic() - last_capture >= args.capture_every * 60:
+            frame = capture_frame(capture_command)
+            if frame is not None:
+                captured_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+                try:
+                    upload_capture(uploader, frame, args.item_id, captured_at)
+                    last_capture = time.monotonic()
+                    LOG.info("Uploaded a photo for item %s", args.item_id)
+                except (urllib.error.URLError, OSError) as exc:
+                    LOG.warning("Photo upload failed (%s); will retry next cycle", exc)
+                finally:
+                    frame.unlink(missing_ok=True)
 
         if args.once:
             break

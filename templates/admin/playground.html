@@ -4,7 +4,7 @@
 
 {% block title %}Inference playground{% endblock %}
 {% block page_title %}Inference playground{% endblock %}
-{% block page_subtitle %}Run the trained model on an arbitrary image and sensor triple{% endblock %}
+{% block page_subtitle %}Run the trained model on any photo and reading, one step of a session at a time{% endblock %}
 
 {% block content %}
 <div class="stack">
@@ -17,16 +17,17 @@
             <div class="card__body">
                 <form id="playgroundForm">
                     <div class="field">
-                        <label class="field__label" for="pgImage">Food image</label>
+                        <label class="field__label" for="pgImage">Food photo</label>
                         <div class="drop-zone" id="dropZone" role="button" tabindex="0"
-                             aria-label="Choose or drop a food image">
+                             aria-label="Choose or drop a food photo">
                             <div id="dropPrompt">
                                 {{ icon('image', 30) }}
                                 <p class="small" style="margin-top:0.5rem">
-                                    Drop a JPEG or PNG here, or click to choose one
+                                    Drop a JPEG or PNG here, or click to choose one.
+                                    Full-resolution camera frames are fine.
                                 </p>
                             </div>
-                            <img id="preview" alt="Selected image preview" hidden>
+                            <img id="preview" alt="Selected photo preview" hidden>
                         </div>
                         <input class="visually-hidden" id="pgImage" name="image" type="file"
                                accept="image/jpeg,image/png">
@@ -34,32 +35,57 @@
 
                     <div class="field-row">
                         <div class="field">
-                            <label class="field__label" for="pgTemp">Temperature</label>
-                            <input class="input" id="pgTemp" name="temperature" type="number"
-                                   step="0.01" value="28.00" required>
+                            <label class="field__label" for="pgTemp">Temperature (&deg;C)</label>
+                            <input class="input" id="pgTemp" name="temperature" type="number" step="0.01" value="28.74" required>
                         </div>
                         <div class="field">
-                            <label class="field__label" for="pgHumidity">Humidity</label>
-                            <input class="input" id="pgHumidity" name="humidity" type="number"
-                                   step="0.01" value="60.00" required>
+                            <label class="field__label" for="pgHumidity">Humidity (% RH)</label>
+                            <input class="input" id="pgHumidity" name="humidity" type="number" step="0.01" value="58.04" required>
                         </div>
                         <div class="field">
-                            <label class="field__label" for="pgGas">Gas</label>
-                            <input class="input" id="pgGas" name="gas" type="number"
-                                   step="0.01" value="185.00" required>
+                            <label class="field__label" for="pgGas">Gas (raw)</label>
+                            <input class="input" id="pgGas" name="gas" type="number" step="0.1" value="185" required>
                         </div>
                     </div>
 
-                    <p class="field__hint" style="margin-bottom:0.9rem">
-                        Feature order is fixed at
-                        <span class="mono">[Temperature, Humidity, Gas]</span> and scaled with the
-                        fitted scaler. Day is deliberately not an input.
-                    </p>
+                    <div class="field-row">
+                        <div class="field">
+                            <label class="field__label" for="pgSession">Session</label>
+                            <input class="input" id="pgSession" name="session" type="text" maxlength="40" value="playground">
+                            <span class="field__hint">Readings in one session build rolling history, like one food batch.</span>
+                        </div>
+                        <div class="field">
+                            <label class="field__label" for="pgMinutes">Minutes since previous</label>
+                            <input class="input" id="pgMinutes" name="minutes_since_previous" type="number" step="0.1" min="0" max="1440" value="2">
+                            <span class="field__hint">Training readings were 2 minutes apart.</span>
+                        </div>
+                    </div>
 
-                    <button class="btn btn--primary btn--block" type="submit" id="pgSubmit"
-                            {{ 'disabled' if not model.trained_model_available }}>
-                        {{ icon('cpu', 15) }}Predict remaining shelf life
-                    </button>
+                    {% if model.rsl and model.rsl.image_only %}
+                    <p class="field__hint" style="margin-bottom:0.9rem">
+                        The served model takes the photograph only. These readings are
+                        recorded next to the estimate so you can compare runs, but they are
+                        not an input and do not change the number.
+                    </p>
+                    {% elif model.rsl and model.rsl.envelope %}
+                    <p class="field__hint" style="margin-bottom:0.9rem">
+                        Trained on {{ model.rsl.envelope.Temperature.min }}&ndash;{{ model.rsl.envelope.Temperature.max }} &deg;C,
+                        {{ model.rsl.envelope.Humidity.min }}&ndash;{{ model.rsl.envelope.Humidity.max }} % RH,
+                        gas {{ '%g' % model.rsl.envelope.Gas.min }}&ndash;{{ '%g' % model.rsl.envelope.Gas.max }}.
+                        Outside that the output is extrapolation.
+                    </p>
+                    {% endif %}
+
+                    <div class="row">
+                        <button class="btn btn--primary" type="submit" id="pgSubmit" style="flex:1"
+                                {{ 'disabled' if not model.trained_model_available }}>
+                            {{ icon('cpu', 15) }}Add reading and predict
+                        </button>
+                        <button class="btn btn--ghost" type="button" id="pgReset"
+                                {{ 'disabled' if not model.trained_model_available }}>
+                            {{ icon('refresh', 15) }}New session
+                        </button>
+                    </div>
                 </form>
             </div>
         </section>

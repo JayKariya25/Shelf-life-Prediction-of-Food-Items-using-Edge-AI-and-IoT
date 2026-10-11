@@ -210,3 +210,11 @@ class SensorSourceModes(AppTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReportingCadence(AppTestCase):
+    def test_a_device_stays_online_between_scheduled_reports(self):
+        """The online window must outlast the report interval, with room for jitter."""
+        config = self.app.config
+        self.assertGreaterEqual(config["DEVICE_ONLINE_SECONDS"],
+                                2 * config["DEVICE_REPORT_INTERVAL_SECONDS"])

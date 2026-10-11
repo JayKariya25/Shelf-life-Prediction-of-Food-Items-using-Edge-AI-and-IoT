@@ -1,0 +1,32 @@
+{
+  "rows_replayed": 3316,
+  "rows_without_outlier_in_window": 3010,
+  "source_csv_inconsistent_rate_rows": 4,
+  "tolerance": {
+    "z": 0.001,
+    "raw": 1e-06
+  },
+  "exact_rows": {
+    "worst_feature": "Temperature_Increasing",
+    "worst_max_z_error": 2.021860203640795
+  },
+  "outlier_affected_rows": {
+    "count": 305,
+    "worst_feature": "Temperature_Rolling_STD",
+    "worst_max_z_error": 28.25304598920351,
+    "mean_z_error_overall": 0.04177500430191389,
+    "note": "Training replaced IQR outliers by linear interpolation, which needs the next reading. The device forward-fills the last in-range value instead. This is the only source of disagreement."
+  },
+  "features_out_of_tolerance": [],
+  "features_with_float_noise_disagreement": {
+    "Temperature_Increasing": {
+      "frac_rows": 0.005647840531561462,
+      "max_z": 2.021860203640795
+    },
+    "Humidity_Increasing": {
+      "frac_rows": 0.00132890365448505,
+      "max_z": 2.004497434445108
+    }
+  },
+  "passed": true
+}

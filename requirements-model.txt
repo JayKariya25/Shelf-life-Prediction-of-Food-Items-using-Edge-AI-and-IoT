@@ -1,12 +1,17 @@
-# Environment that can serve the trained multimodal Keras model.
-# Install into a Python 3.12 virtualenv - TensorFlow has no 3.14 wheel.
+# Environment that serves the trained multimodal shelf-life model in the website.
+# Use Python 3.12 - TensorFlow publishes no wheel for Python 3.14.
 #
 #   python3.12 -m venv .venv-model
 #   .venv-model/bin/pip install -r requirements-model.txt
 
 Flask>=3.0,<4.0
-tensorflow>=2.16,<2.21
-scikit-learn>=1.3     # provides the StandardScaler that sensor_scaler.pkl unpickles into
-joblib>=1.3           # loads the fitted scaler
-pillow>=10.0          # image decoding and resizing
+waitress>=3.0            # production WSGI server used by tools/serve.sh
+
+tensorflow==2.20.0       # TFLite interpreter + the exact JPEG decoder used in training
 numpy>=1.26
+pillow>=10.0             # image probing, LANCZOS resize, JPEG re-encode
+simplejpeg>=1.7          # TF-identical JPEG decoding where TensorFlow is absent (Pi)
+
+# Pinned: ml/rsl_multimodal/artifacts/sensor_scaler.pkl was pickled with 1.8.0. Other
+# versions unpickle it with an InconsistentVersionWarning.
+scikit-learn==1.8.0

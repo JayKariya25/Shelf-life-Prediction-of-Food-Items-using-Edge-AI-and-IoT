@@ -58,22 +58,23 @@ def create_app(config_name: str | None = None, **overrides: Any) -> Flask:
     os.makedirs(app.config["UPLOAD_DIR"], exist_ok=True)
     os.makedirs(app.config["MODEL_DIR"], exist_ok=True)
 
+    if app.config["DEVICE_ONLINE_SECONDS"] <= app.config["DEVICE_REPORT_INTERVAL_SECONDS"]:
+        app.logger.warning(
+            "DEVICE_ONLINE_SECONDS (%s) should exceed DEVICE_REPORT_INTERVAL_SECONDS (%s); "
+            "devices will appear offline between reports.",
+            app.config["DEVICE_ONLINE_SECONDS"], app.config["DEVICE_REPORT_INTERVAL_SECONDS"],
+        )
+
     report = db_module.init_db(app.config["DATABASE_PATH"])
     if report.get("migrated_columns"):
         app.logger.info("Schema migrated: added %s", ", ".join(report["migrated_columns"]))
     if report.get("seeded_food_types"):
         app.logger.info("Seeded %d food reference profiles", report["seeded_food_types"])
 
-    app.extensions["predictors"] = PredictorRegistry(
-        model_path=app.config.get("MODEL_PATH", ""),
-        labels_path=app.config.get("MODEL_LABELS_PATH", ""),
-        keras_model_path=app.config.get("KERAS_MODEL_PATH", ""),
-        scaler_path=app.config.get("SCALER_PATH", ""),
-        config_path=app.config.get("MODEL_CONFIG_PATH", ""),
-    )
+    app.extensions["predictors"] = build_registry(app.config)
     status = app.extensions["predictors"].status()
     app.logger.info(
-        "Active estimator: %s v%s (%s)",
+        "Active estimator: %s (%s, %s)",
         status["active_model"], status["active_version"], status["active_kind"],
     )
 
@@ -88,6 +89,15 @@ def create_app(config_name: str | None = None, **overrides: Any) -> Flask:
     _register_cli(app)
 
     return app
+
+
+def build_registry(config) -> PredictorRegistry:
+    return PredictorRegistry(
+        rsl_bundle_dir=config.get("RSL_BUNDLE_DIR", ""),
+        rsl_model_file=config.get("RSL_MODEL_FILE", "models/image_ensemble_blocked_full_float16.tflite"),
+        max_photo_age_hours=float(config.get("RSL_MAX_PHOTO_AGE_HOURS", 6.0)),
+        trained_food_keys=tuple(config.get("RSL_TRAINED_FOOD_KEYS", ("banana",))),
+    )
 
 
 def _configure_logging(app: Flask) -> None:

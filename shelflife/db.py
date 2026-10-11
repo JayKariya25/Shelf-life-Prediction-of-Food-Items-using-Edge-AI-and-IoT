@@ -14,7 +14,7 @@ from typing import Any, Iterable, Iterator
 
 from flask import current_app, g
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 7
 
 # --- schema -----------------------------------------------------------------
 # Tables are created in dependency order. Everything is IF NOT EXISTS so that
@@ -90,6 +90,7 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
         status         TEXT NOT NULL DEFAULT 'active',
         closed_at      TEXT,
         image_path     TEXT,
+        image_captured_at TEXT,
         notes          TEXT,
         created_at     TEXT NOT NULL,
         updated_at     TEXT NOT NULL,
@@ -136,6 +137,8 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
         image_path           TEXT,
         rationale            TEXT,
         fallback_reason      TEXT,
+        notes                TEXT,
+        model_inputs         TEXT,
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
         FOREIGN KEY (item_id) REFERENCES items (id) ON DELETE CASCADE
     )
@@ -318,6 +321,16 @@ def _migrate_legacy_columns(conn: sqlite3.Connection) -> list[str]:
         },
         "predictions": {
             "fallback_reason": "ALTER TABLE predictions ADD COLUMN fallback_reason TEXT",
+            # JSON list of the trained model's warnings for this run.
+            "notes": "ALTER TABLE predictions ADD COLUMN notes TEXT",
+            # What the estimator actually read, in words. Stored per row because the
+            # served model can change: rows written by the fusion export read sensor
+            # history, rows written by the image ensemble read only the photograph.
+            "model_inputs": "ALTER TABLE predictions ADD COLUMN model_inputs TEXT",
+        },
+        "items": {
+            # When the current photograph was taken; the trained model refuses a stale one.
+            "image_captured_at": "ALTER TABLE items ADD COLUMN image_captured_at TEXT",
         },
         "settings": {
             "theme": "ALTER TABLE settings ADD COLUMN theme TEXT NOT NULL DEFAULT 'system'",
@@ -333,6 +346,46 @@ def _migrate_legacy_columns(conn: sqlite3.Connection) -> list[str]:
                 conn.execute(ddl)
                 applied.append(f"{table}.{column}")
     return applied
+
+
+def _rebuild_legacy_settings(conn: sqlite3.Connection) -> bool:
+    """Give the prototype's ``settings`` table the ON DELETE CASCADE it lacks.
+
+    The first version created ``settings`` with a plain
+    ``FOREIGN KEY (user_id) REFERENCES users (id)``. ``CREATE TABLE IF NOT EXISTS``
+    never rewrites an existing table, so the corrected definition was never applied
+    and deleting a user failed with "FOREIGN KEY constraint failed". SQLite cannot
+    alter a constraint, so the table is rebuilt and its rows copied across.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='settings'"
+    ).fetchone()
+    if row is None or "ON DELETE CASCADE" in (row["sql"] or ""):
+        return False
+
+    columns = [c["name"] for c in conn.execute("PRAGMA table_info(settings)")]
+    shared = ", ".join(columns)
+    conn.execute("ALTER TABLE settings RENAME TO settings_legacy")
+    conn.execute("""
+        CREATE TABLE settings (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id               INTEGER UNIQUE NOT NULL,
+            email_notifications   INTEGER NOT NULL DEFAULT 0,
+            sms_notifications     INTEGER NOT NULL DEFAULT 0,
+            alert_days_before     INTEGER NOT NULL DEFAULT 2,
+            latest_image          TEXT,
+            theme                 TEXT NOT NULL DEFAULT 'system',
+            temperature_unit      TEXT NOT NULL DEFAULT 'C',
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )
+    """)
+    # Copy only rows whose user still exists, so the new constraint holds.
+    conn.execute(
+        f"INSERT INTO settings ({shared}) SELECT {shared} FROM settings_legacy "
+        f"WHERE user_id IN (SELECT id FROM users)"
+    )
+    conn.execute("DROP TABLE settings_legacy")
+    return True
 
 
 def _seed_food_types(conn: sqlite3.Connection) -> int:
@@ -422,6 +475,7 @@ def init_db(database_path: str) -> dict[str, Any]:
                 conn.execute(statement)
             report["created"] = fresh
             report["migrated_columns"] = _migrate_legacy_columns(conn)
+            report["rebuilt_settings"] = _rebuild_legacy_settings(conn)
             for statement in INDEX_STATEMENTS:
                 conn.execute(statement)
             report["seeded_food_types"] = _seed_food_types(conn)

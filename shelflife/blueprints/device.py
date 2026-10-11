@@ -14,7 +14,9 @@ from typing import Any
 from flask import Blueprint, current_app, jsonify, request
 
 from .. import services
-from ..db import iso_now
+from datetime import timedelta
+
+from ..db import iso_now, parse_ts, utcnow
 from ..security import authenticate_device, client_key, rate_limiter, touch_device
 from ..sensors import SensorValidationError, validate_payload
 
@@ -56,11 +58,13 @@ def ingest_reading():
 
     Body::
 
-        {"temperature_c": 24.8, "humidity_pct": 61.2,
-         "pressure_hpa": 1008.1, "recorded_at": "2026-08-25T10:30:00Z",
-         "item_id": 7, "firmware": "pi-agent 1.0"}
+        {"temperature_c": 28.7, "humidity_pct": 58.0, "gas_ppm": 185,
+         "recorded_at": "2026-08-25T10:30:00Z", "item_id": 7,
+         "firmware": "pi-agent 1.1"}
 
-    Only ``recorded_at`` and one measurement are required.
+    At least one measurement is required. ``gas_ppm`` carries the gas sensor's raw
+    value in the same units the model was trained on (roughly 150-195 in the training
+    run); the trained model needs it, the baseline ignores it.
     """
     device, error = _require_device()
     if error:
@@ -147,19 +151,41 @@ def upload_capture():
         os.remove(destination)
         return fail("payload_too_large", "Capture exceeds the size limit.", 413)
 
+    # When the frame was taken. The trained model pairs a photo with the readings around
+    # it, so an agent that uploads a buffered frame late should say when it was captured.
+    captured_at = iso_now()
+    raw_captured = (request.form.get("captured_at") or "").strip()
+    if raw_captured:
+        parsed = parse_ts(raw_captured)
+        if parsed is None:
+            os.remove(destination)
+            return fail("invalid_captured_at", "captured_at is not a valid timestamp.", 422)
+        if parsed > utcnow() + timedelta(minutes=5):
+            os.remove(destination)
+            return fail("invalid_captured_at", "captured_at is in the future.", 422)
+        captured_at = parsed.replace(microsecond=0).isoformat()
+
     item_id = request.form.get("item_id")
     attached_to = None
     if item_id:
         try:
             item_id = int(item_id)
         except ValueError:
+            os.remove(destination)
             return fail("invalid_item", "item_id must be an integer.", 422)
-        if services.get_item(device["user_id"], item_id) is not None:
-            services.update_item(device["user_id"], item_id, {"image_path": stored_name})
-            attached_to = item_id
+        if services.get_item(device["user_id"], item_id) is None:
+            os.remove(destination)
+            return fail("invalid_item", "That item does not belong to this device's owner.", 404)
+        services.update_item(
+            device["user_id"], item_id,
+            {"image_path": stored_name, "image_captured_at": captured_at,
+             "device_id": device["id"]},
+        )
+        attached_to = item_id
 
     touch_device(device["id"])
-    return ok({"image_path": stored_name, "attached_to_item": attached_to}, 201)
+    return ok({"image_path": stored_name, "attached_to_item": attached_to,
+               "captured_at": captured_at}, 201)
 
 
 @bp.get("/v1/config")
@@ -172,7 +198,8 @@ def device_heartbeat():
     return ok(
         {
             "device": {"id": device["id"], "name": device["name"], "location": device["location"]},
-            "report_interval_seconds": current_app.config["SIMULATOR_INTERVAL_SECONDS"],
+            # The trained model was fitted on readings 2 minutes apart.
+            "report_interval_seconds": current_app.config["DEVICE_REPORT_INTERVAL_SECONDS"],
             "online_window_seconds": current_app.config["DEVICE_ONLINE_SECONDS"],
             "server_time": iso_now(),
             "server_version": current_app.config["APP_VERSION"],

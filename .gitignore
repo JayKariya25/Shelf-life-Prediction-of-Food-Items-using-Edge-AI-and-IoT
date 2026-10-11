@@ -15,14 +15,19 @@ static/uploads/*
 !static/uploads/.gitkeep
 .env
 
-# Trained models and datasets are large binaries; distribute them out of band
-models/*.tflite
-models/*.onnx
-models/*.h5
-models/*.keras
-artifacts/
-data/
-!models/README.md
+# --- trained model bundle (ml/rsl_multimodal) -------------------------------
+# Committed: code, notebooks, docs, results, the scaler, configs, the dataset
+# CSVs and the recommended float16 TFLite export (~8 MB) - enough to run the
+# website and reproduce the report. Ignored: everything regenerable or bulky.
+ml/rsl_multimodal/data_images/
+ml/rsl_multimodal/models/*.keras
+ml/rsl_multimodal/models/*.tflite
+!ml/rsl_multimodal/models/fusion_blocked_full_float16.tflite
+ml/rsl_multimodal/artifacts/backbone_features.npy
+ml/rsl_multimodal/artifacts/mobilenetv3s_backbone.*
+ml/rsl_multimodal/runtime/
+ml/rsl_multimodal/.venv/
+*.ipynb_checkpoints/
 
 # Second virtualenv holding the TensorFlow runtime (Python 3.12)
 .venv-model/

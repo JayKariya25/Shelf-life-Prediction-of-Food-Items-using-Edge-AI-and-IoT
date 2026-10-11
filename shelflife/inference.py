@@ -1,27 +1,25 @@
 """Freshness / remaining-shelf-life estimation.
 
-Two estimators live behind one interface:
+Two estimators live behind one registry:
+
+``RSLModel`` (see :mod:`shelflife.rsl_model`)
+    The project's trained multimodal model: an item photograph plus the session's
+    Temperature / Humidity / Gas readings -> remaining shelf life in days. Tagged
+    ``model_kind="trained-model"``.
 
 ``KineticBaselinePredictor``
     A temperature-and-humidity kinetic model (Q10 formulation) parameterised by
     published postharvest storage guidance. It uses **no image data** and it is
-    **not** a trained model. Every response it produces is tagged
-    ``model_kind="heuristic-baseline"`` so the UI can say so out loud.
+    **not** a trained model; every result is tagged ``model_kind="heuristic-baseline"``.
 
-``TFLiteModelPredictor``
-    Loads a trained multimodal model exported to TFLite when one is present on
-    disk and a runtime is importable. Until the team trains and drops a model in
-    ``models/``, this predictor stays inactive and the app degrades to the
-    baseline rather than pretending.
-
-The registry picks the trained model when it is available and falls back
-otherwise. Nothing here fabricates accuracy figures or confidence scores that
-the underlying method cannot support.
+For each item the registry uses the trained model only when it can be used
+*honestly* - a recent photo, gas readings, and readings inside the range the model
+was trained on - and otherwise falls back to the baseline and records why. Nothing
+here fabricates accuracy figures or confidence scores the method cannot support.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from dataclasses import asdict, dataclass, field
@@ -69,6 +67,11 @@ class PredictionContext:
     # Absolute path to the item's photograph. The trained multimodal model needs
     # the pixels; the kinetic baseline ignores this entirely.
     image_full_path: str | None = None
+    # When that photograph was taken, as hours before the newest reading.
+    image_age_hours: float | None = None
+    # The session's sensor readings, oldest first, already thinned to the training
+    # cadence - the trained model replays them to build its rolling features.
+    rsl_history: list = field(default_factory=list)
     # Environment actually experienced while stored, as
     # ``(duration_hours, temperature_c, humidity_pct, gas_ppm)`` segments. When
     # present the baseline integrates degradation across it instead of assuming
@@ -84,11 +87,13 @@ class Prediction:
 
     freshness_class: str
     remaining_hours: float
-    remaining_hours_low: float
-    remaining_hours_high: float
+    remaining_hours_low: float | None
+    remaining_hours_high: float | None
     model_name: str
     model_version: str
     model_kind: str            # "heuristic-baseline" | "trained-model"
+    # What this estimator read, for the item page. Set by each predictor.
+    model_inputs: str = ""
     freshness_confidence: float | None = None
     inference_ms: float = 0.0
     image_used: bool = False
@@ -97,7 +102,8 @@ class Prediction:
     # so the UI can explain the downgrade instead of silently showing baseline
     # numbers under a "trained model" banner.
     fallback_reason: str | None = None
-    factors: dict[str, float] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
+    factors: dict[str, Any] = field(default_factory=dict)
 
     @property
     def days(self) -> int:
@@ -112,8 +118,9 @@ class Prediction:
         data["days"] = self.days
         data["hours"] = self.hours
         data["remaining_hours"] = round(self.remaining_hours, 2)
-        data["remaining_hours_low"] = round(self.remaining_hours_low, 2)
-        data["remaining_hours_high"] = round(self.remaining_hours_high, 2)
+        for key in ("remaining_hours_low", "remaining_hours_high"):
+            value = getattr(self, key)
+            data[key] = round(value, 2) if value is not None else None
         data["inference_ms"] = round(self.inference_ms, 2)
         data["status_color"] = status_color(self.freshness_class)
         return data
@@ -189,18 +196,14 @@ def effective_temperature(temperature: float, ideal_min: float | None) -> float:
 
 
 def gas_factor(gas_ppm: float | None) -> float:
-    """Optional MQ-135 style VOC reading treated as a spoilage-gas proxy.
+    """Always 1.0: the baseline does not use the gas channel.
 
-    The sensor is not part of the core BMP280 + SHT31 build, so this is applied
-    only when a reading is actually present.
+    An earlier version penalised readings above ~150 as if they were MQ-135 ppm. The
+    project's gas sensor reports raw values of roughly 150-195 throughout an entire
+    spoilage run, in uncalibrated units, so those thresholds penalised *every* normal
+    reading. Gas is used by the trained model, which learned its scale from the data.
     """
-    if gas_ppm is None:
-        return 1.0
-    if gas_ppm <= 150:
-        return 1.0
-    if gas_ppm <= 220:
-        return _clamp(1.0 - (gas_ppm - 150) * (0.30 / 70.0), 0.70, 1.0)
-    return max(0.35, 0.70 - (gas_ppm - 220) * 0.004)
+    return 1.0
 
 
 class KineticBaselinePredictor:
@@ -312,6 +315,7 @@ class KineticBaselinePredictor:
             model_name=self.name,
             model_version=self.version,
             model_kind=self.kind,
+            model_inputs="temperature and humidity only; the photo is not used",
             # A rule-based estimator has no calibrated posterior. Reporting a
             # number here would be fabricating one, so it stays None.
             freshness_confidence=None,
@@ -356,8 +360,6 @@ class KineticBaselinePredictor:
                 f"for this produce, so the rate model is held at "
                 f"{kinetic_temp:.0f} °C and an injury penalty applied (x{f_chill:.2f})."
             )
-        if f_gas < 0.999:
-            parts.append(f"Elevated spoilage-gas reading (x{f_gas:.2f}).")
         parts.append(f"Modelled total life {total_hours / 24:.1f} days at the current condition.")
         if ctx.history:
             parts.append(
@@ -367,199 +369,152 @@ class KineticBaselinePredictor:
         return " ".join(parts)
 
 
-class TFLiteModelPredictor:
-    """Adapter for a trained multimodal model exported to TFLite.
-
-    Activates only when *both* a model file exists and a TFLite runtime can be
-    imported. Any failure during load leaves the predictor inactive so the app
-    falls back to the baseline instead of crashing on the edge device.
-    """
-
-    kind = "trained-model"
-    uses_image = True
-
-    def __init__(self, model_path: str, labels_path: str = "") -> None:
-        self.model_path = Path(model_path)
-        self.labels_path = Path(labels_path) if labels_path else None
-        self.name = self.model_path.stem or "trained model"
-        self.version = "unknown"
-        self.available = False
-        self.load_error: str | None = None
-        self._interpreter = None
-        self._labels: list[str] = list(FRESHNESS_CLASSES)
-        self._load()
-
-    def _load(self) -> None:
-        if not self.model_path.exists():
-            self.load_error = f"No model file at {self.model_path}"
-            return
-        interpreter_cls = None
-        try:  # tflite-runtime is the lightweight option on a Raspberry Pi
-            from tflite_runtime.interpreter import Interpreter as interpreter_cls  # type: ignore
-        except ImportError:
-            try:
-                from tensorflow.lite import Interpreter as interpreter_cls  # type: ignore
-            except ImportError:
-                self.load_error = (
-                    "Neither tflite-runtime nor tensorflow is installed; "
-                    "install tflite-runtime on the Pi to enable the trained model."
-                )
-                return
-        try:
-            self._interpreter = interpreter_cls(model_path=str(self.model_path))
-            self._interpreter.allocate_tensors()
-            if self.labels_path and self.labels_path.exists():
-                payload = json.loads(self.labels_path.read_text(encoding="utf-8"))
-                self._labels = list(payload.get("labels", FRESHNESS_CLASSES))
-                self.version = str(payload.get("version", "unknown"))
-                self.name = str(payload.get("name", self.name))
-            self.available = True
-        except Exception as exc:  # pragma: no cover - depends on a real model file
-            self.load_error = f"{type(exc).__name__}: {exc}"
-            self._interpreter = None
-            self.available = False
-
-    def predict(self, ctx: PredictionContext) -> Prediction:  # pragma: no cover
-        if not self.available or self._interpreter is None:
-            raise RuntimeError("Trained model is not loaded")
-        raise NotImplementedError(
-            "Wire the trained model's input tensors here once the export format "
-            "is fixed: image tensor + [temperature, humidity] sensor tensor."
-        )
-
-
 class PredictorRegistry:
-    """Chooses the best estimator that can actually serve each request.
-
-    The trained multimodal model needs an image *and* a gas reading. When either
-    is missing for a particular item, this falls back to the kinetic baseline and
-    records why, rather than fabricating the missing input.
-    """
+    """Chooses the estimator that can honestly serve each request."""
 
     def __init__(
         self,
-        model_path: str = "",
-        labels_path: str = "",
-        keras_model_path: str = "",
-        scaler_path: str = "",
-        config_path: str = "",
+        rsl_bundle_dir: str = "",
+        rsl_model_file: str = "models/image_ensemble_blocked_full_float16.tflite",
+        max_photo_age_hours: float = 6.0,
+        trained_food_keys: tuple[str, ...] = ("banana",),
     ) -> None:
         self.baseline = KineticBaselinePredictor()
-        self.trained: TFLiteModelPredictor | None = None
-        self.multimodal = None
+        self.max_photo_age_hours = max_photo_age_hours
+        self.trained_food_keys = tuple(k.lower() for k in trained_food_keys)
+        self.rsl = None
+        if rsl_bundle_dir:
+            from .rsl_model import RSLModel
 
-        if keras_model_path:
-            from .multimodal import MultimodalShelfLifeModel
-
-            self.multimodal = MultimodalShelfLifeModel(
-                keras_model_path, scaler_path, config_path
-            )
-            if not self.multimodal.available:
-                log.info(
-                    "Trained multimodal model unavailable, using baseline: %s",
-                    self.multimodal.load_error,
-                )
-
-        if model_path:
-            candidate = TFLiteModelPredictor(model_path, labels_path)
-            self.trained = candidate
-            if not candidate.available:
-                log.info("TFLite model unavailable, using baseline: %s", candidate.load_error)
+            self.rsl = RSLModel(rsl_bundle_dir, rsl_model_file)
+            if not self.rsl.available:
+                log.info("Trained RSL model unavailable, using baseline: %s", self.rsl.load_error)
 
     # --- selection --------------------------------------------------------
     @property
     def has_trained_model(self) -> bool:
-        return bool(
-            (self.multimodal is not None and self.multimodal.available)
-            or (self.trained is not None and self.trained.available)
-        )
+        return self.rsl is not None and self.rsl.available
 
     @property
     def active(self):
         """The best estimator in principle, ignoring per-request inputs."""
-        if self.multimodal is not None and self.multimodal.available:
-            return self.multimodal
-        if self.trained is not None and self.trained.available:
-            return self.trained
-        return self.baseline
+        return self.rsl if self.has_trained_model else self.baseline
 
     def blockers(self, ctx: PredictionContext) -> list[str]:
-        """Why the trained model cannot serve this particular context."""
+        """Why the trained model cannot serve this particular item right now."""
+        if not self.has_trained_model:
+            detail = self.rsl.load_error if self.rsl is not None else None
+            return [f"no trained model is loaded ({detail})" if detail
+                    else "no trained model is loaded"]
         reasons: list[str] = []
-        if self.multimodal is None or not self.multimodal.available:
-            return ["No trained model is loaded."]
+        # The model saw one food. Scoring another one would be a confident number about
+        # something it has never seen, so it is refused rather than quietly served.
+        if self.trained_food_keys and ctx.food_key.lower() not in self.trained_food_keys:
+            trained = " or ".join(self.trained_food_keys)
+            reasons.append(
+                f"the trained model was fitted on {trained} only, and this item is "
+                f"{ctx.food_name.lower()} (its photograph would be scored by a model that "
+                f"has never seen this food)"
+            )
         if not ctx.image_full_path or not Path(ctx.image_full_path).is_file():
             reasons.append("this item has no photograph on file")
-        if ctx.gas_ppm is None:
-            reasons.append("no gas reading is available (the model was trained on Temperature, Humidity and Gas)")
+        elif ctx.image_age_hours is not None and ctx.image_age_hours > self.max_photo_age_hours:
+            reasons.append(
+                f"its latest photograph is {ctx.image_age_hours:.1f} h older than the newest "
+                f"reading (the model estimates from how the food looks now, so it needs one "
+                f"under {self.max_photo_age_hours:g} h old)"
+            )
+        # The served image-only ensemble reads nothing but the photograph, so the three
+        # sensor preconditions below do not apply to it.
+        if self.rsl.image_only:
+            return reasons
+        if not ctx.rsl_history:
+            if ctx.gas_ppm is None:
+                reasons.append(
+                    "no gas reading is available (the model was trained on Temperature, "
+                    "Humidity and Gas)"
+                )
+            else:
+                reasons.append("no sensor readings have been recorded for this item yet")
+        else:
+            violations = self.rsl.envelope_violations(ctx.rsl_history[-1])
+            if violations:
+                listed = ", ".join(f"{k} {v:g}" for k, v in violations.items())
+                reasons.append(
+                    f"the current reading ({listed}) is outside the range the model was "
+                    f"trained on ({self.rsl.describe_envelope()})"
+                )
         return reasons
 
     def predict(self, ctx: PredictionContext) -> Prediction:
-        if self.multimodal is not None and self.multimodal.available:
-            blockers = self.blockers(ctx)
-            if not blockers:
-                try:
-                    return self._predict_multimodal(ctx)
-                except Exception as exc:
-                    log.exception("Trained model failed, falling back to baseline")
-                    return self._baseline_with_reason(
-                        ctx, f"the trained model raised {type(exc).__name__}: {exc}"
-                    )
+        if self.rsl is None:
+            return self.baseline.predict(ctx)
+        blockers = self.blockers(ctx)
+        if blockers:
             return self._baseline_with_reason(ctx, " and ".join(blockers))
-
-        if self.trained is not None and self.trained.available:
-            try:
-                return self.trained.predict(ctx)
-            except Exception as exc:
-                log.exception("TFLite model failed, falling back to baseline")
-                return self._baseline_with_reason(ctx, f"the TFLite model raised {exc}")
-
-        return self.baseline.predict(ctx)
+        try:
+            return self._predict_rsl(ctx)
+        except Exception as exc:
+            log.exception("Trained model failed, falling back to baseline")
+            return self._baseline_with_reason(
+                ctx, f"the trained model raised {type(exc).__name__}: {exc}"
+            )
 
     def _baseline_with_reason(self, ctx: PredictionContext, reason: str) -> Prediction:
         prediction = self.baseline.predict(ctx)
-        if self.multimodal is not None or self.trained is not None:
-            prediction.fallback_reason = (
-                f"Estimated with the kinetic baseline because {reason}."
-            )
+        if self.rsl is not None:
+            prediction.fallback_reason = f"Estimated with the kinetic baseline because {reason}."
         return prediction
 
-    def _predict_multimodal(self, ctx: PredictionContext) -> Prediction:
-        model = self.multimodal
-        image = model.open_image(ctx.image_full_path)
-        output = model.predict(image, ctx.temperature_c, ctx.humidity_pct, ctx.gas_ppm)
+    def _predict_rsl(self, ctx: PredictionContext) -> Prediction:
+        model = self.rsl
+        image = model.load_image_path(ctx.image_full_path)
+        result = model.predict(image, ctx.rsl_history)
 
-        # The network regresses remaining shelf life in days; clamp at zero for
-        # display without touching the raw value used in the rationale.
-        raw_days = output.remaining_days
-        remaining_hours = max(0.0, raw_days) * 24.0
-
-        # The class is derived from the regression output, not separately
-        # predicted; the rationale says so.
-        total = remaining_hours + max(0.0, ctx.hours_stored)
-        fraction = remaining_hours / total if total > 0 else 0.0
+        remaining_hours = result.days * 24.0
+        # The model is trained on RSL = 11 - Day, so the whole life is max_days by
+        # construction and the fraction left follows directly.
+        fraction = result.days / model.max_days if model.max_days else 0.0
         freshness = classify(fraction)
 
-        # Only report an interval if the training run published an error metric.
-        mae_hours = None
-        for key in ("test_mae", "mae", "val_mae"):
-            if key in model.metrics:
-                mae_hours = float(model.metrics[key]) * 24.0
-                break
-        low = max(0.0, remaining_hours - mae_hours) if mae_hours is not None else None
-        high = remaining_hours + mae_hours if mae_hours is not None else None
-
-        rationale = (
-            f"{model.name} predicted {raw_days:.2f} days of remaining shelf life from the "
-            f"item photograph and the sensor triple "
-            f"(T={ctx.temperature_c:.1f}, RH={ctx.humidity_pct:.1f}, Gas={ctx.gas_ppm:.1f}). "
-            f"The freshness class is derived from that regression output, not predicted "
-            f"separately."
-        )
-        if mae_hours is not None:
-            rationale += f" The interval is the model's held-out MAE of {mae_hours / 24:.2f} days."
+        # Every tracked item is a batch the model has never seen, so the honest
+        # interval is the leave-one-day-out error, not the within-session one.
+        mae_days = model.new_batch_mae_days
+        if mae_days is not None:
+            spread = mae_days * 24.0
+            low = max(0.0, remaining_hours - spread)
+            high = min(model.max_days * 24.0, remaining_hours + spread)
         else:
-            rationale += " No held-out error metric is recorded, so no interval is shown."
+            low = high = None
+
+        if model.image_only:
+            heads = (model.metrics.get("ensemble_heads") or 0)
+            rationale = (
+                f"{model.name} ({model.version}) estimated {result.days:.2f} days from the "
+                f"item photograph alone"
+                + (f", averaged over {heads} independently trained heads" if heads else "")
+                + ". The sensor readings are not an input to it: on a batch it had never "
+                  "seen, the sensor branch described the room rather than the food, so the "
+                  "photograph-only model is both more accurate and usable without a gas "
+                  "sensor. The freshness class is derived from that estimate, not predicted "
+                  "separately."
+            )
+        else:
+            latest = ctx.rsl_history[-1]
+            rationale = (
+                f"{model.name} ({model.version}) estimated {result.days:.2f} days from the item "
+                f"photograph and {len(ctx.rsl_history)} sensor reading"
+                f"{'' if len(ctx.rsl_history) == 1 else 's'} (latest T {latest.temperature:.2f}, "
+                f"RH {latest.humidity:.2f}, gas {latest.gas:g}). The freshness class is derived "
+                f"from that estimate, not predicted separately."
+            )
+        if mae_days is not None:
+            rationale += (
+                f" The ±{mae_days:.2f}-day band is the model's mean error on days it never saw "
+                f"in training - the right figure for a new batch."
+            )
+        else:
+            rationale += " No held-out error figure was found, so no band is shown."
 
         return Prediction(
             freshness_class=freshness,
@@ -569,18 +524,20 @@ class PredictorRegistry:
             model_name=model.name,
             model_version=model.version,
             model_kind=model.kind,
+            model_inputs=("photo only" if model.image_only
+                          else "photo + sensor history"),
             # A single-output regressor emits no class probability.
             freshness_confidence=None,
-            inference_ms=output.inference_ms,
+            inference_ms=result.inference_ms,
             image_used=True,
             rationale=rationale,
+            notes=list(result.warnings),
             factors={
-                "predicted_days_raw": round(raw_days, 4),
-                "hours_stored": round(max(0.0, ctx.hours_stored), 2),
+                "predicted_days_raw": round(result.raw_days, 4),
+                "readings_in_session": result.reading_number,
                 "fraction_remaining": round(fraction, 4),
-                "temperature_c": ctx.temperature_c,
-                "humidity_pct": ctx.humidity_pct,
-                "gas_ppm": ctx.gas_ppm,
+                "image_decoder": result.decoder,
+                "image_age_hours": ctx.image_age_hours,
             },
         )
 
@@ -593,16 +550,15 @@ class PredictorRegistry:
             "active_kind": active.kind,
             "uses_image": bool(getattr(active, "uses_image", False)),
             "requires_gas": bool(getattr(active, "requires_gas", False)),
-            "trained_model_configured": self.multimodal is not None or self.trained is not None,
+            "trained_food_keys": list(self.trained_food_keys),
+            "trained_model_configured": self.rsl is not None,
             "trained_model_available": self.has_trained_model,
-            "trained_model_error": None,
+            "trained_model_error": self.rsl.load_error if self.rsl is not None else None,
             "baseline_name": self.baseline.name,
             "baseline_version": self.baseline.version,
             "supports_calibrated_confidence": False,
+            "max_photo_age_hours": self.max_photo_age_hours,
         }
-        if self.multimodal is not None:
-            status["trained_model_error"] = self.multimodal.load_error
-            status["multimodal"] = self.multimodal.status()
-        elif self.trained is not None:
-            status["trained_model_error"] = self.trained.load_error
+        if self.rsl is not None:
+            status["rsl"] = self.rsl.status()
         return status

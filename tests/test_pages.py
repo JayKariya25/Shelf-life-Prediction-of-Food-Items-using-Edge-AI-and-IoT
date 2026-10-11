@@ -69,7 +69,7 @@ class PagesRender(AppTestCase):
 
     def test_item_detail_says_the_image_was_not_used(self):
         item = self.create_item()
-        self.assertIn("image not used", self.get(f"/items/{item['id']}"))
+        self.assertIn("the photo is not used", self.get(f"/items/{item['id']}"))
 
 
 class AuthPagesRender(AppTestCase):

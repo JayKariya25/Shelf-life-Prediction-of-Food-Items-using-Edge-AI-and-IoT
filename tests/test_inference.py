@@ -13,7 +13,6 @@ from shelflife.inference import (
     KineticBaselinePredictor,
     PredictionContext,
     PredictorRegistry,
-    TFLiteModelPredictor,
     chilling_factor,
     classify,
     effective_temperature,
@@ -95,10 +94,21 @@ class Factors(unittest.TestCase):
         fridge, _ = model.life_hours(ctx, 3.0, 90.0, None)
         self.assertLess(fridge, ideal)
 
-    def test_gas_factor_is_neutral_without_a_reading(self):
-        self.assertEqual(gas_factor(None), 1.0)
-        self.assertEqual(gas_factor(100), 1.0)
-        self.assertLess(gas_factor(300), 0.7)
+    def test_the_baseline_ignores_gas(self):
+        """The gas sensor's raw units are uncalibrated; only the trained model uses them.
+
+        An earlier version treated ~150+ as elevated ppm, which penalised every normal
+        reading from the project's sensor (152-195 across a whole spoilage run).
+        """
+        for value in (None, 0, 152, 185, 195, 300, 5000):
+            self.assertEqual(gas_factor(value), 1.0, value)
+
+    def test_a_normal_gas_reading_does_not_shorten_the_baseline_estimate(self):
+        model = KineticBaselinePredictor()
+        without = model.predict(PredictionContext(**TOMATO, temperature_c=22.0, humidity_pct=88.0))
+        with_gas = model.predict(PredictionContext(**TOMATO, temperature_c=22.0, humidity_pct=88.0,
+                                                   gas_ppm=185.0))
+        self.assertEqual(without.remaining_hours, with_gas.remaining_hours)
 
 
 class Classification(unittest.TestCase):
@@ -175,24 +185,27 @@ class Honesty(unittest.TestCase):
         self.assertFalse(status["supports_calibrated_confidence"])
         self.assertFalse(status["trained_model_configured"])
 
-    def test_missing_model_file_degrades_instead_of_crashing(self):
-        registry = PredictorRegistry("/nonexistent/model.tflite")
+    def test_missing_model_bundle_degrades_instead_of_crashing(self):
+        registry = PredictorRegistry("/nonexistent/bundle")
         self.assertEqual(registry.active.kind, "heuristic-baseline")
         self.assertTrue(registry.status()["trained_model_configured"])
         self.assertFalse(registry.status()["trained_model_available"])
-        self.assertIn("No model file", registry.status()["trained_model_error"])
+        self.assertIn("Missing from the model bundle", registry.status()["trained_model_error"])
+
+    def test_missing_bundle_names_every_missing_file(self):
+        error = PredictorRegistry("/nonexistent/bundle").status()["trained_model_error"]
+        # The scaler and feature builder are only needed by a sensor-taking export, and
+        # which export it is cannot be known until the graph loads, so they are not named.
+        for label in ("model", "config", "image loader"):
+            self.assertIn(label, error)
 
     def test_unloadable_model_still_produces_a_prediction(self):
-        registry = PredictorRegistry("/nonexistent/model.tflite")
+        registry = PredictorRegistry("/nonexistent/bundle")
         prediction = registry.predict(
             PredictionContext(**TOMATO, temperature_c=22.0, humidity_pct=80.0)
         )
         self.assertEqual(prediction.model_kind, "heuristic-baseline")
-
-    def test_tflite_adapter_reports_why_it_is_unavailable(self):
-        predictor = TFLiteModelPredictor("/nope/model.tflite")
-        self.assertFalse(predictor.available)
-        self.assertIsNotNone(predictor.load_error)
+        self.assertIn("no trained model is loaded", prediction.fallback_reason)
 
 
 class Serialisation(unittest.TestCase):

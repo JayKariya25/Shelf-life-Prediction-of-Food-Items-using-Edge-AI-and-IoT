@@ -21,9 +21,16 @@ CSRF_RE = re.compile(r'name="csrf_token" value="([^"]+)"')
 
 
 class AppTestCase(unittest.TestCase):
-    """Base case: a throwaway app backed by a temporary SQLite file."""
+    """Base case: a throwaway app backed by a temporary SQLite file.
+
+    By default no model bundle is configured, so tests run quickly on the kinetic
+    baseline. Model tests set ``rsl_bundle`` to a fixture or the real bundle, and
+    ``rsl_model_file`` when they need an export other than the served default.
+    """
 
     sensor_source = "simulated"
+    rsl_bundle: str | None = None
+    rsl_model_file: str | None = None
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -33,6 +40,8 @@ class AppTestCase(unittest.TestCase):
             DATABASE_PATH=str(root / "test.db"),
             UPLOAD_DIR=str(root / "uploads"),
             SENSOR_SOURCE=self.sensor_source,
+            RSL_BUNDLE_DIR=self.rsl_bundle or str(root / "no-model-bundle"),
+            **({"RSL_MODEL_FILE": self.rsl_model_file} if self.rsl_model_file else {}),
         )
         os.makedirs(self.app.config["UPLOAD_DIR"], exist_ok=True)
         self.client = self.app.test_client()

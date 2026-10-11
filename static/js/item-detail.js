@@ -1,7 +1,5 @@
 /* Item detail: gauge, prediction history, environment chart and item actions. */
-import {
-    api, formatDurationLong, readJsonScript, toast, escapeHtml,
-} from "./core.js";
+import { api, formatDurationLong, readJsonScript, toast } from "./core.js";
 import { lineChart, gauge, SERIES_COLORS } from "./charts.js";
 
 const item = readJsonScript("itemData");
@@ -13,9 +11,8 @@ const itemId = item ? item.id : null;
 
 /* ------------------------------------------------------------- gauge ----- */
 function fractionRemaining(record) {
-    if (record.remaining_hours === null || record.remaining_hours === undefined) return 0;
-    const total = record.remaining_hours + (record.hours_stored || 0);
-    return total > 0 ? record.remaining_hours / total : 0;
+    // Computed server-side so it matches the estimator that produced the value.
+    return typeof record.life_fraction === "number" ? record.life_fraction : 0;
 }
 
 function renderGauge(record) {
@@ -94,28 +91,11 @@ $("predictBtn")?.addEventListener("click", async (event) => {
     try {
         const result = await api(`/api/v1/items/${itemId}/predict`, { method: "POST" });
         const updated = result.item;
-        const headline = $("remainingHeadline");
-        if (headline) headline.textContent = formatDurationLong(updated.remaining_hours);
-        const range = document.getElementById("rangeLine");
-        if (range && updated.remaining_hours <= 0) range.hidden = true;
-        const rationale = $("rationaleText");
-        if (rationale && result.prediction.rationale) rationale.textContent = result.prediction.rationale;
-
-        const pill = $("freshnessPill");
-        if (pill) {
-            const tone = { critical: "crit", warning: "warn", ok: "ok" }[updated.alert_level] || "muted";
-            pill.innerHTML =
-                `<span class="pill pill--${tone}"><span class="pill__dot"></span>` +
-                `${escapeHtml(updated.freshness_class)}</span>`;
-        }
-        renderGauge(updated);
-
-        history.push({
-            created_at: result.prediction.created_at,
-            remaining_hours: result.prediction.remaining_hours,
-        });
-        renderHistoryChart();
-        toast(`Re-estimated: ${formatDurationLong(updated.remaining_hours)} remaining.`);
+        const which = result.prediction.model_kind === "trained-model" ? "trained model" : "kinetic baseline";
+        toast(`Re-estimated with the ${which}: ${formatDurationLong(updated.remaining_hours)} remaining.`);
+        // The model used, its notes and any fallback reason can all change, so redraw
+        // the page from the server rather than patching pieces of it.
+        setTimeout(() => window.location.reload(), 700);
     } catch (error) {
         toast(error.message || "Could not run the estimate.", "error");
     } finally {

@@ -43,6 +43,13 @@
                     </dd>
                     <dt>Uses image</dt><dd>{{ 'Yes' if model.uses_image else 'No' }}</dd>
                     <dt>Needs gas reading</dt><dd>{{ 'Yes' if model.requires_gas else 'No' }}</dd>
+                    <dt>Produce it may serve</dt>
+                    <dd>
+                        {% if model.trained_food_keys %}
+                            {{ model.trained_food_keys | map('capitalize') | join(', ') }}
+                            <span class="tiny muted">&mdash; others use the baseline</span>
+                        {% else %}Any <span class="tiny muted">&mdash; unrestricted</span>{% endif %}
+                    </dd>
                 </dl>
                 <a class="btn btn--ghost btn--block" style="margin-top:1rem"
                    href="{{ url_for('admin.model_card') }}">Full model card</a>
@@ -59,14 +66,26 @@
                     <dt>Devices</dt><dd>{{ stats.devices }}</dd>
                     <dt>Alerts raised</dt><dd>{{ stats.alerts }}</dd>
                 </dl>
-                {% if model.trained_model_available and model.requires_gas %}
+                {% if model.trained_model_available %}
                 <div class="banner banner--info" style="margin-top:1rem">
                     {{ icon('info', 17) }}
                     <div class="banner__body small">
-                        The trained model needs a <strong>Gas</strong> reading and an item
-                        photograph. The reference BMP280 + SHT31 build has no gas sensor, so
-                        monitoring items fall back to the baseline until an MQ-135 reports.
-                        The playground and evaluation pages supply all three inputs directly.
+                        {% if model.rsl and model.rsl.image_only %}
+                        A tracked item uses the trained model whenever it is
+                        {{ model.trained_food_keys | join(' or ') or 'any produce' }} and has a
+                        photo under {{ '%g' % model.max_photo_age_hours }} h old. The served
+                        model reads the photograph only, so <strong>no gas sensor and no
+                        reading history are required</strong>. Items of another produce, or
+                        without a recent photo, fall back to the baseline with the reason on
+                        the item page.
+                        {% else %}
+                        A tracked item uses the trained model only with a photo under
+                        {{ '%g' % model.max_photo_age_hours }} h old and live
+                        <strong>temperature, humidity and gas</strong> readings inside the range it was
+                        trained on ({{ model.rsl.envelope.Temperature.min }}&ndash;{{ model.rsl.envelope.Temperature.max }} &deg;C).
+                        Everything else falls back to the baseline, with the reason on the item page.
+                        {% endif %}
+                        The playground and evaluation pages always run the trained model.
                     </div>
                 </div>
                 {% endif %}
