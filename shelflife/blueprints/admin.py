@@ -185,6 +185,11 @@ def runtime_info() -> dict[str, Any]:
         "min_reading_spacing_seconds": config["RSL_MIN_READING_SPACING_SECONDS"],
         "device_report_interval_seconds": config["DEVICE_REPORT_INTERVAL_SECONDS"],
         "server_time": iso_now(),
+        # Whether the real-conditions source is reachable, so a silent fall back to the
+        # simulator is visible here rather than only in the logs.
+        "weather": (lambda source: source.status() if source is not None else None)(
+            current_app.extensions.get("weather")
+        ),
     }
 
 

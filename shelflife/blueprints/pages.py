@@ -112,6 +112,8 @@ def device():
             "device_online_seconds": current_app.config["DEVICE_ONLINE_SECONDS"],
             "retention_days": current_app.config["READING_RETENTION_DAYS"],
             "env_name": current_app.config["ENV_NAME"],
+            "weather_place": current_app.config.get("WEATHER_PLACE", ""),
+            "weather_enabled": bool(current_app.extensions.get("weather")),
         },
     )
 
