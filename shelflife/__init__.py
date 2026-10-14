@@ -71,6 +71,7 @@ def create_app(config_name: str | None = None, **overrides: Any) -> Flask:
     if report.get("seeded_food_types"):
         app.logger.info("Seeded %d food reference profiles", report["seeded_food_types"])
 
+    app.extensions["weather"] = build_weather_source(app.config)
     app.extensions["predictors"] = build_registry(app.config)
     status = app.extensions["predictors"].status()
     app.logger.info(
@@ -89,6 +90,26 @@ def create_app(config_name: str | None = None, **overrides: Any) -> Flask:
     _register_cli(app)
 
     return app
+
+
+def build_weather_source(config):
+    """The shared observed-weather source, or None when it is switched off.
+
+    One instance per application so its cache and its single-flight lock are shared by
+    every request thread. Nothing is fetched here: the first page that needs a reading
+    triggers the first request, so start-up never waits on the network.
+    """
+    if not config.get("WEATHER_ENABLED", False):
+        return None
+    from .weather import WeatherSource
+
+    return WeatherSource(
+        latitude=float(config.get("WEATHER_LATITUDE", 12.9344)),
+        longitude=float(config.get("WEATHER_LONGITUDE", 77.5353)),
+        place=config.get("WEATHER_PLACE", "") or "",
+        ttl_seconds=float(config.get("WEATHER_TTL_SECONDS", 600)),
+        timeout_seconds=float(config.get("WEATHER_TIMEOUT_SECONDS", 4.0)),
+    )
 
 
 def build_registry(config) -> PredictorRegistry:

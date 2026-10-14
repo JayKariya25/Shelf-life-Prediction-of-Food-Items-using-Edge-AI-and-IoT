@@ -104,11 +104,25 @@ class BaseConfig:
     LOGIN_LOCKOUT_SECONDS = as_int(os.environ.get("LOGIN_LOCKOUT_SECONDS"), 300)
 
     # --- sensing -----------------------------------------------------------
-    # auto      -> use live device readings when a device reported recently,
-    #              otherwise fall back to the labelled simulator
-    # live      -> never simulate; show "no data" when hardware is silent
-    # simulated -> always simulate (useful for demos and UI work)
+    # auto      -> a device that reported recently, else the real observed weather
+    #              for WEATHER_PLACE, else the labelled simulator
+    # live      -> never substitute; show "no data" when hardware is silent
+    # observed  -> skip devices and always use the real observed weather
+    # simulated -> always simulate (useful for demos, UI work and offline machines)
     SENSOR_SOURCE = os.environ.get("SENSOR_SOURCE", "auto").strip().lower()
+    # Real ambient conditions, so the pages show the actual environment instead of a
+    # plausible model of one. Fetched from Open-Meteo, which needs no API key. The
+    # default point is PES University, Bengaluru, where the project is built; set
+    # these to wherever the food actually is. Enclosed storage (fridge, freezer) keeps
+    # its nominal profile regardless - outdoor air says nothing about a closed fridge.
+    WEATHER_ENABLED = as_bool(os.environ.get("WEATHER_ENABLED"), True)
+    WEATHER_LATITUDE = as_float(os.environ.get("WEATHER_LATITUDE"), 12.9344)
+    WEATHER_LONGITUDE = as_float(os.environ.get("WEATHER_LONGITUDE"), 77.5353)
+    WEATHER_PLACE = (os.environ.get("WEATHER_PLACE") or "Bengaluru").strip()
+    # One fetch per this interval, shared by every request and thread.
+    WEATHER_TTL_SECONDS = as_int(os.environ.get("WEATHER_TTL_SECONDS"), 600)
+    # Kept short: a page load must not wait on a slow network.
+    WEATHER_TIMEOUT_SECONDS = as_float(os.environ.get("WEATHER_TIMEOUT_SECONDS"), 4.0)
     # A device is considered online if it reported within this window. It must be
     # comfortably longer than DEVICE_REPORT_INTERVAL_SECONDS, or a device reporting
     # on schedule flickers offline between readings.
@@ -175,6 +189,9 @@ class TestingConfig(BaseConfig):
     TESTING = True
     DEBUG = False
     SENSOR_SOURCE = "simulated"
+    # No test may depend on a network round-trip; the weather tests inject a fake
+    # fetcher instead. See tests/test_weather.py.
+    WEATHER_ENABLED = False
     LOGIN_MAX_ATTEMPTS = 1000
     WTF_CSRF_ENABLED = False
 

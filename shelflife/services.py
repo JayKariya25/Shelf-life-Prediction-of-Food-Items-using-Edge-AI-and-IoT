@@ -68,7 +68,7 @@ def _online_cutoff() -> str:
 def has_live_data(user_id: int) -> bool:
     """True when a device belonging to this user reported recently."""
     mode = current_app.config["SENSOR_SOURCE"]
-    if mode == "simulated":
+    if mode in {"simulated", "observed"}:
         return False
     row = query_one(
         "SELECT 1 FROM readings WHERE user_id = ? AND source = 'live' AND recorded_at >= ? LIMIT 1",
@@ -77,14 +77,43 @@ def has_live_data(user_id: int) -> bool:
     return row is not None
 
 
+def weather_source():
+    """The application's shared observed-weather source, or None if disabled."""
+    return current_app.extensions.get("weather")
+
+
+def observed_reading() -> dict[str, Any] | None:
+    """Real conditions for the configured location, or None if unobtainable."""
+    source = weather_source()
+    if source is None:
+        return None
+    observation = source.current()
+    if observation is None:
+        return None
+    payload = observation.to_dict()
+    payload["place"] = observation.place
+    return payload
+
+
 def sensor_mode(user_id: int) -> str:
-    """Which source the UI should label the current numbers with."""
+    """Which source the UI should label the current numbers with.
+
+    Preference order for ``auto``: a device on the shelf, then a real weather station
+    near the configured location, then the simulator. The two substitutes are separate
+    modes rather than one "no hardware" mode because they differ in kind - one is a
+    measurement taken somewhere else, the other is not a measurement at all - and the
+    pages have to be able to say which.
+    """
     configured = current_app.config["SENSOR_SOURCE"]
     if configured == "simulated":
         return "simulated"
+    if configured == "observed":
+        return "observed" if observed_reading() is not None else "simulated"
     if has_live_data(user_id):
         return "live"
-    return "offline" if configured == "live" else "simulated"
+    if configured == "live":
+        return "offline"
+    return "observed" if observed_reading() is not None else "simulated"
 
 
 def simulator_seed(user_id: int) -> str:
@@ -120,6 +149,13 @@ def latest_reading(user_id: int) -> dict[str, Any]:
             "source": "none",
             "mode": "offline",
         }
+    if mode == "observed":
+        observed = observed_reading()
+        if observed is not None:
+            observed["mode"] = "observed"
+            return observed
+        # The source went away between sensor_mode() and here; the simulator below is
+        # the labelled fallback, so there is nothing to do but fall through to it.
     reading = sensors.synthesise(utcnow(), simulator_seed(user_id)).to_dict()
     reading["mode"] = "simulated"
     return reading
@@ -182,8 +218,14 @@ def reading_for_item(
 
     resolved = dict(ambient)
     resolved["environment_source"] = ambient.get("mode", "simulated")
+    place = ambient.get("place") or "the configured location"
     resolved["environment_note"] = {
         "live": "Measured by the ambient sensor",
+        "observed": (
+            f"Live outdoor conditions for {place}. Real measurements, but from a weather "
+            f"station rather than from beside the food - attach a device for the actual "
+            f"shelf temperature."
+        ),
         "simulated": "No hardware connected - values come from the built-in simulator",
         "offline": "No sensor has reported recently",
     }.get(ambient.get("mode"), "")
@@ -227,6 +269,19 @@ def reading_history(user_id: int, hours: int = 12, max_points: int = 48) -> dict
 
     if mode == "offline":
         return {"mode": "offline", "hours": hours, "points": []}
+
+    if mode == "observed":
+        source = weather_source()
+        observations = source.series(hours) if source is not None else []
+        if observations:
+            # Left at the provider's hourly resolution: these are measurements, and
+            # resampling them up to max_points would imply a finer record than exists.
+            return {
+                "mode": "observed",
+                "hours": hours,
+                "place": observations[-1].place,
+                "points": [observation.to_dict() for observation in observations],
+            }
 
     series = sensors.synthesise_series(now, max_points, step_seconds, simulator_seed(user_id))
     return {
@@ -313,6 +368,29 @@ def environment_segments(
 
     if mode == "offline":
         return []
+
+    if mode == "observed":
+        source = weather_source()
+        observations = source.series(max(1, int(math.ceil(total_hours)))) if source else []
+        if len(observations) >= 2:
+            segments = []
+            for index, observation in enumerate(observations):
+                start = parse_ts(observation.recorded_at)
+                if start is None:
+                    continue
+                following = (parse_ts(observations[index + 1].recorded_at)
+                             if index + 1 < len(observations) else until)
+                if following is None:
+                    continue
+                duration = (following - max(start, since)).total_seconds() / 3600.0
+                if duration <= 0:
+                    continue
+                segments.append((duration, observation.temperature_c,
+                                 observation.humidity_pct, None))
+            if segments:
+                return segments
+        # One point or none cannot describe a window; fall through to the simulator,
+        # which the caller already labels as such.
 
     # Simulated: sample the deterministic series across the storage window.
     sample_count = int(max(2, min(96, math.ceil(total_hours))))

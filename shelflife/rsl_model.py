@@ -316,6 +316,9 @@ class RSLModel:
         ablations = read(results / "ablations.json") or {}
         ensemble = read(results / "image_ensemble_lodo.json") or {}
         comparison = read(split_dir / "comparison_metrics.json") or {}
+        # The evidence behind the card's claims: how much of the within-session score is
+        # duplicate retrieval, and what the alternatives actually measured.
+        experiments = read(results / "experiments.json") or {}
 
         variant = self.model_path.stem.rsplit("_", 1)[-1]
         served = ((tflite.get("variants") or {}).get(variant) or {})
@@ -359,6 +362,33 @@ class RSLModel:
                 for name, v in (tflite.get("variants") or {}).items()
             },
             "comparison": comparison,
+            # Branch-by-branch within-session scores, so the card can show the
+            # comparison it is implicitly making rather than only the served figure.
+            "branches": (comparison.get("test_metrics") or {}),
+            "graph_consistency_max_abs_diff": comparison.get("graph_consistency_max_abs_diff"),
+            # A 1-NN lookup on *untrained* features. The closer this is to a trained
+            # score, the less the within-session number means.
+            "lookup_probe": {
+                split_name: {
+                    "image_mae": (((probe.get("frozen_imagenet_features") or {})
+                                   .get("metrics") or {}).get("MAE")),
+                    "sensor_mae": (((probe.get("scaled_sensor_vector") or {})
+                                    .get("metrics") or {}).get("MAE")),
+                    "median_minutes_to_nearest_train_row": (
+                        (probe.get("minutes_to_nearest_train_row") or {}).get("median")),
+                }
+                for split_name, probe in (ablations.get("nearest_neighbour_probe") or {}).items()
+            },
+            "experiments": {
+                name: {
+                    "seeds": len(variant.get("seeds") or []),
+                    "sensor": (variant.get("mean_MAE") or {}).get("sensor"),
+                    "image": (variant.get("mean_MAE") or {}).get("image"),
+                    "fusion": (variant.get("mean_MAE") or {}).get("fusion"),
+                    "ensemble": (variant.get("ensemble_of_seeds_MAE") or {}).get("image"),
+                }
+                for name, variant in experiments.items()
+            },
             "leave_one_day_out_mae": lodo_mae,
             "leave_one_day_out_days": {
                 key: {
