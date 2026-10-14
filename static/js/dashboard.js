@@ -36,9 +36,11 @@ function renderReading(reading, mode) {
 
     const pill = $("sensorPill");
     if (pill) {
+        const place = reading.place ? ` \u00b7 ${reading.place}` : "";
         const config = {
             live: ["ok", "Live sensor", true],
             offline: ["crit", "Sensor offline", false],
+            observed: ["info", `Local weather${place}`, true],
             simulated: ["warn", "Simulated data", false],
         }[mode] || ["muted", "Unknown source", false];
         pill.innerHTML =
@@ -46,8 +48,24 @@ function renderReading(reading, mode) {
             `<span class="pill__dot${config[2] ? " pill__dot--pulse" : ""}"></span>${config[1]}</span>`;
     }
 
+    // Kept in step with the server-rendered caption, so a mode change between page
+    // load and the next poll cannot leave the page crediting the wrong source.
+    const humidityMeta = $("humidityMeta");
+    if (humidityMeta) {
+        humidityMeta.textContent = {
+            live: "SHT31 sensor",
+            observed: `Weather station, ${reading.place || "configured location"}`,
+            offline: "No sensor reporting",
+            simulated: "Built-in simulator",
+        }[mode] || "Unknown source";
+    }
+
     const modeText = $("sensorModeText");
-    if (modeText) modeText.textContent = mode.charAt(0).toUpperCase() + mode.slice(1);
+    if (modeText) {
+        modeText.textContent = mode === "observed"
+            ? "Local weather"
+            : mode.charAt(0).toUpperCase() + mode.slice(1);
+    }
 }
 
 /* ------------------------------------------------------------- charts ----- */
