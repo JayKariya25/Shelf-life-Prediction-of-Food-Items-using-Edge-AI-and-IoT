@@ -12,17 +12,20 @@ Setup on the Pi::
     export SHELFLIFE_TOKEN=slp_...            # from the Device & Model page
     python3 tools/pi_agent.py
 
-For the trained shelf-life model the website also needs, per tracked item:
+For the trained shelf-life model the website needs, per tracked item, only a recent
+**photo** - the served image ensemble reads nothing else:
 
-* **gas readings** - set ``SHELFLIFE_GAS_COMMAND`` to a command that prints one number:
-  the gas sensor's value in the *same units your training rig recorded* (roughly
-  150-195 during the training run). The agent does not guess a driver or a scale,
-  because a mis-scaled value silently puts every prediction outside what the model
-  knows. Example: ``SHELFLIFE_GAS_COMMAND="python3 /home/pi/read_gas.py"``.
 * **photos** - set ``SHELFLIFE_ITEM_ID`` to the item being watched. A frame is taken
   every ``--capture-every`` minutes (default 30) with ``SHELFLIFE_CAPTURE_COMMAND``,
   whose ``{path}`` placeholder is replaced by the file to write. By default it tries
   ``rpicam-still`` and then ``libcamera-still``.
+
+Gas is **optional** and unused by the served model. ``SHELFLIFE_GAS_COMMAND`` is still
+honoured - set it to a command printing one number in the *same units the training rig
+recorded* (roughly 150-195 during the training run), and the value is stored and charted.
+The agent does not guess a driver or a scale, because a mis-scaled value would silently
+put every prediction outside what the model knows. It is only an input if you switch
+``RSL_MODEL_FILE`` back to the fusion export.
 
 Without the sensor libraries it exits rather than inventing numbers.
 
@@ -312,10 +315,15 @@ def main() -> int:
 
     capture_command = args.capture_command or (default_capture_command() if args.item_id else None)
     if args.item_id and not capture_command:
-        LOG.warning("SHELFLIFE_ITEM_ID is set but no camera command was found; photos are off")
+        # The served model reads the photograph and nothing else, so a missing camera -
+        # not a missing gas sensor - is what pushes an item onto the kinetic baseline.
+        LOG.warning("SHELFLIFE_ITEM_ID is set but no camera command was found; photos are "
+                    "off, so the website will use its kinetic baseline for item %s "
+                    "instead of the trained model", args.item_id)
     if not args.gas_command:
-        LOG.warning("No SHELFLIFE_GAS_COMMAND: readings carry no gas value, so the website "
-                    "will use its kinetic baseline instead of the trained model")
+        LOG.info("No SHELFLIFE_GAS_COMMAND: readings carry no gas value. The served "
+                 "image-only model does not use gas, so this changes nothing unless you "
+                 "switch RSL_MODEL_FILE back to the fusion export.")
     last_capture = 0.0
 
     running = True

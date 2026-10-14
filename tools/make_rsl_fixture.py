@@ -55,6 +55,9 @@ NEW_BATCH_MAE = {"1": 2.0, "2": 0.5}      # fusion MAE per held-out day -> mean 
 ENSEMBLE_MAE = {"1": 1.2, "2": 0.4}       # ensemble MAE per held-out day -> mean 0.80
 ENSEMBLE_HEADS = 3
 ENSEMBLE_PUBLISHED_MAE = 0.1468
+# 1-NN-on-untrained-features scores, the model card's leakage evidence.
+PROBE_BLOCKED_MAE = 0.0812
+PROBE_RANDOM_MAE = 0.0196
 
 BOUNDS = {
     "Temperature": {"lower": 27.455, "upper": 29.335},
@@ -213,9 +216,61 @@ def main(out: Path) -> Path:
                   "metrics": {"fusion": {"MAE": mae}, "image": {"MAE": mae / 2},
                               "sensor": {"MAE": mae * 2}}}
             for day, mae in NEW_BATCH_MAE.items()
+        },
+        # The leakage evidence the model card shows: a 1-NN lookup on untrained
+        # features. The real bundle's blocked figure is 0.081; these are stand-ins
+        # with the same shape.
+        "nearest_neighbour_probe": {
+            "blocked": {
+                "frozen_imagenet_features": {"metrics": {"MAE": PROBE_BLOCKED_MAE}},
+                "scaled_sensor_vector": {"metrics": {"MAE": 0.5166}},
+                "minutes_to_nearest_train_row": {"median": 96.0},
+            },
+            "random": {
+                "frozen_imagenet_features": {"metrics": {"MAE": PROBE_RANDOM_MAE}},
+                "scaled_sensor_vector": {"metrics": {"MAE": 0.1155}},
+                "minutes_to_nearest_train_row": {"median": 2.0},
+            },
         }}))
 
-    ensemble_metrics = {"MAE": ENSEMBLE_PUBLISHED_MAE, "RMSE": 0.39, "R2": 0.955, "n": 271}
+    # The multi-seed variant study behind the choice of served model.
+    (out / "results" / "experiments.json").write_text(json.dumps({
+        "baseline": {
+            "seeds": [42, 7, 2026],
+            "mean_MAE": {
+                "sensor": {"mean": 2.3921, "std": 0.1064, "runs": [2.46, 2.41, 2.20]},
+                "image": {"mean": 0.9199, "std": 0.086, "runs": [0.81, 1.04, 0.88]},
+                "fusion": {"mean": 1.1128, "std": 0.179, "runs": [1.24, 0.94, 0.95]},
+            },
+            "ensemble_of_seeds_MAE": {"image": 0.8558},
+        },
+        "sensor_dropout": {
+            "seeds": [42, 7, 2026],
+            "mean_MAE": {
+                "sensor": {"mean": 2.3582, "std": 0.1133, "runs": [2.46, 2.41, 2.20]},
+                "image": {"mean": 0.9102, "std": 0.0981, "runs": [0.81, 1.04, 0.88]},
+                "fusion": {"mean": 1.7053, "std": 0.1855, "runs": [1.71, 1.93, 1.47]},
+            },
+            "ensemble_of_seeds_MAE": {},
+        },
+    }))
+
+    # Branch-by-branch within-session scores, which the model card tabulates.
+    (out / "results" / "blocked_full" / "comparison_metrics.json").write_text(json.dumps({
+        "split": "blocked", "feature_set": "full", "n_test": 271,
+        "graph_consistency_max_abs_diff": 0.0,
+        "test_metrics": {
+            "Sensor only": {"MAE": 0.7535, "RMSE": 1.3876, "R2": 0.4431,
+                            "WithinHalfDay": 0.4502, "WithinOneDay": 0.8339, "n": 271},
+            "Image only": {"MAE": 0.2424, "RMSE": 0.4371, "R2": 0.9448,
+                           "WithinHalfDay": 0.8708, "WithinOneDay": 0.9631, "n": 271},
+            "Fusion": {"MAE": 0.2662, "RMSE": 0.6694, "R2": 0.8704,
+                       "WithinHalfDay": 0.9230, "WithinOneDay": 0.9700, "n": 271},
+        },
+    }))
+
+    ensemble_metrics = {"MAE": ENSEMBLE_PUBLISHED_MAE, "RMSE": 0.39, "R2": 0.955,
+                        "WithinHalfDay": 0.963, "WithinOneDay": 0.974, "n": 271}
     (out / "results" / "blocked_full" / "image_ensemble_metrics.json").write_text(json.dumps({
         "heads": ENSEMBLE_HEADS, "metrics": {"test": ensemble_metrics}}))
     (out / "results" / "blocked_full" / "image_ensemble_tflite_report.json").write_text(
