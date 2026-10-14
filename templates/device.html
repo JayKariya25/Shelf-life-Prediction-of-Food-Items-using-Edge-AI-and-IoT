@@ -154,7 +154,13 @@
             <dl class="kv">
                 <dt>Environment</dt><dd>{{ config.env_name }}</dd>
                 <dt>App version</dt><dd>{{ app_version }}</dd>
-                <dt>Sensor source</dt><dd>{{ config.sensor_source }} (currently {{ sensor_mode }})</dd>
+                <dt>Sensor source</dt>
+                <dd>
+                    {{ config.sensor_source }} (currently
+                    {%- if sensor_mode == 'observed' %} local weather for
+                        {{ config.weather_place or 'the configured location' }}
+                    {%- else %} {{ sensor_mode }}{% endif %})
+                </dd>
                 <dt>Reading retention</dt><dd>{{ config.retention_days }} days</dd>
                 <dt>Server time (UTC)</dt><dd class="mono">{{ now.strftime('%Y-%m-%d %H:%M:%S') }}</dd>
             </dl>

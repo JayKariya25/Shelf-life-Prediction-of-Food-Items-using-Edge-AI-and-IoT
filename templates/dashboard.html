@@ -7,7 +7,7 @@
 {% block page_subtitle %}Live storage conditions and shelf-life estimates{% endblock %}
 
 {% block topbar_actions %}
-    <span id="sensorPill">{{ sensor_pill(snapshot.sensor_mode) }}</span>
+    <span id="sensorPill">{{ sensor_pill(snapshot.sensor_mode, snapshot.reading.place) }}</span>
     <button class="btn btn--ghost btn--sm" id="refreshBtn" title="Recompute every estimate now">
         {{ icon('refresh', 15) }}<span>Refresh</span>
     </button>
@@ -40,7 +40,12 @@
                 {% if snapshot.reading.humidity_pct is not none %}{{ '%.0f' % snapshot.reading.humidity_pct }}<small>%</small>{% else %}--{% endif %}
             </div>
             <div class="stat__spark" id="humiditySpark"></div>
-            <div class="stat__meta" id="humidityMeta">SHT31 sensor</div>
+            <div class="stat__meta" id="humidityMeta">
+                {%- if snapshot.sensor_mode == 'live' %}SHT31 sensor
+                {%- elif snapshot.sensor_mode == 'observed' %}Weather station, {{ snapshot.reading.place or 'configured location' }}
+                {%- elif snapshot.sensor_mode == 'offline' %}No sensor reporting
+                {%- else %}Built-in simulator{% endif %}
+            </div>
         </div>
 
         <div class="stat">
@@ -164,7 +169,10 @@
                         <dt>Uses image</dt>
                         <dd>{{ 'Yes' if snapshot.model.uses_image else 'No' }}</dd>
                         <dt>Sensor source</dt>
-                        <dd id="sensorModeText">{{ snapshot.sensor_mode | capitalize }}</dd>
+                        <dd id="sensorModeText">
+                            {%- if snapshot.sensor_mode == 'observed' %}Local weather
+                            {%- else %}{{ snapshot.sensor_mode | capitalize }}{% endif %}
+                        </dd>
                         <dt>Live readings</dt>
                         <dd>{{ snapshot.live_readings_stored }}</dd>
                     </dl>

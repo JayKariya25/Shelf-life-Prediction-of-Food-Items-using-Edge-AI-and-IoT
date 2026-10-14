@@ -10,7 +10,9 @@
 {% endmacro %}
 
 {#- Sensor source indicator. Simulated data is always labelled as such. -#}
-{% macro sensor_pill(mode) %}
+{#- Which of the three sources the numbers on this page came from. A real observation
+    must never be labelled as simulated, and the simulator must never look measured. -#}
+{% macro sensor_pill(mode, place='') %}
     {% if mode == 'live' %}
         <span class="pill pill--ok" title="A device reported within the online window">
             <span class="pill__dot pill__dot--pulse"></span>Live sensor
@@ -18,6 +20,12 @@
     {% elif mode == 'offline' %}
         <span class="pill pill--crit" title="No device has reported recently">
             <span class="pill__dot"></span>Sensor offline
+        </span>
+    {% elif mode == 'observed' %}
+        <span class="pill pill--info" title="Real measurements from a weather station near
+                {{ place or 'the configured location' }} - not from beside the food.
+                Attach a device for the actual shelf temperature.">
+            <span class="pill__dot pill__dot--pulse"></span>Local weather{% if place %} &middot; {{ place }}{% endif %}
         </span>
     {% else %}
         <span class="pill pill--warn" title="No hardware connected - values come from the built-in simulator">

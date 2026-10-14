@@ -33,6 +33,25 @@
                     </dd>
                     <dt>Platform</dt><dd class="tiny">{{ runtime.platform }}</dd>
                     <dt>Sensor source</dt><dd>{{ runtime.sensor_source }}</dd>
+                    <dt>Real conditions</dt>
+                    <dd>
+                        {% if runtime.weather %}
+                            {% if runtime.weather.available %}
+                                <span class="pill pill--ok">Reachable</span>
+                                {{ runtime.weather.place }}
+                                <span class="tiny muted">&middot; {{ runtime.weather.provider }},
+                                refreshed every {{ (runtime.weather.ttl_seconds / 60) | round | int }} min</span>
+                            {% else %}
+                                <span class="pill pill--warn">Unreachable</span>
+                                <span class="tiny muted">falling back to the simulator
+                                {%- if runtime.weather.last_error %} &middot;
+                                <span class="mono">{{ runtime.weather.last_error }}</span>{% endif %}</span>
+                            {% endif %}
+                        {% else %}
+                            <span class="pill pill--muted">Disabled</span>
+                            <span class="tiny muted">WEATHER_ENABLED is off; the simulator is used</span>
+                        {% endif %}
+                    </dd>
                     <dt>Server time</dt><dd class="mono tiny">{{ runtime.server_time }}</dd>
                 </dl>
             </div>

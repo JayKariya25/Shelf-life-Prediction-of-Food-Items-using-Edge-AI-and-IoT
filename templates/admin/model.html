@@ -239,6 +239,132 @@ reading history -> 27 engineered features
         </section>
     </div>
 
+    <section class="card">
+        <div class="card__header">{{ icon('activity', 18) }}<h2>How much of the within-session score is lookup?</h2></div>
+        <div class="card__body">
+            <p class="small muted">
+                Frames arrive every ~2 minutes, so neighbouring frames are near-duplicates.
+                This probe answers each test row by copying the label of its nearest training
+                row using <strong>untrained</strong> ImageNet features &mdash; no learning at
+                all. The closer it gets to a trained score, the less the within-session
+                number means.
+            </p>
+            <div class="table-wrap" style="margin-top:0.8rem">
+                <table class="table">
+                    <thead><tr><th>Split</th><th class="table__num">1-NN image MAE</th>
+                        <th class="table__num">1-NN sensor MAE</th>
+                        <th class="table__num">Median minutes to nearest train row</th></tr></thead>
+                    <tbody>
+                        {% for name, probe in m.lookup_probe.items() %}
+                        <tr{% if name == 'blocked' %} class="strong"{% endif %}>
+                            <td>{{ name }}{% if name == 'blocked' %} <span class="pill pill--ok">used</span>{% endif %}</td>
+                            <td class="table__num">{{ '%.3f' % probe.image_mae if probe.image_mae is not none else '--' }}</td>
+                            <td class="table__num">{{ '%.3f' % probe.sensor_mae if probe.sensor_mae is not none else '--' }}</td>
+                            <td class="table__num">{{ probe.median_minutes_to_nearest_train_row if probe.median_minutes_to_nearest_train_row is not none else '--' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="banner banner--warn" style="margin-top:0.9rem">
+                {{ icon('warning', 17) }}
+                <div class="banner__body small">
+                    <div class="banner__title">No within-day split measures generalisation here</div>
+                    On the random split a pure lookup scores
+                    {{ '%.3f' % m.lookup_probe.random.image_mae if m.lookup_probe.get('random') else '0.02' }}
+                    days, so any model score on it is meaningless. The blocked split used here
+                    is harder but still not clean. This is why the headline figure above is the
+                    leave-one-day-out error.
+                </div>
+            </div>
+        </div>
+    </section>
+
+    {% if m.branches %}
+    <div class="grid grid--halves">
+        <section class="card">
+            <div class="card__header">{{ icon('sliders', 18) }}<h2>Each branch, within a session</h2></div>
+            <div class="table-wrap">
+                <table class="table">
+                    <thead><tr><th>Model</th><th class="table__num">MAE</th><th class="table__num">RMSE</th>
+                        <th class="table__num">R&sup2;</th><th class="table__num">&le; 0.5 d</th></tr></thead>
+                    <tbody>
+                        {% for name, metrics in m.branches.items() %}
+                        <tr>
+                            <td>{{ name }}</td>
+                            <td class="table__num">{{ '%.3f' % metrics.MAE }}</td>
+                            <td class="table__num">{{ '%.3f' % metrics.RMSE }}</td>
+                            <td class="table__num">{{ '%.3f' % metrics.R2 }}</td>
+                            <td class="table__num">{{ '%.0f%%' % (metrics.WithinHalfDay * 100) }}</td>
+                        </tr>
+                        {% endfor %}
+                        {% if m.within_session %}
+                        <tr class="strong">
+                            <td>{{ 'Image ensemble (served)' if rsl.image_only else 'Served export' }}</td>
+                            <td class="table__num">{{ '%.3f' % m.within_session.MAE }}</td>
+                            <td class="table__num">{{ '%.3f' % m.within_session.RMSE }}</td>
+                            <td class="table__num">{{ '%.3f' % m.within_session.R2 }}</td>
+                            <td class="table__num">{{ '%.0f%%' % (m.within_session.WithinHalfDay * 100) }}</td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="card__footer">
+                <p class="card__hint">
+                    Blocked test split, n = {{ m.within_session.n if m.within_session else '?' }}.
+                    Read these against the lookup probe above, not on their own.
+                    {% if m.graph_consistency_max_abs_diff is not none %}
+                    The deployable graph matches the staged pipeline to
+                    {{ '%.2g' % m.graph_consistency_max_abs_diff }} days.
+                    {% endif %}
+                </p>
+            </div>
+        </section>
+
+        {% if m.experiments %}
+        <section class="card">
+            <div class="card__header">{{ icon('flask', 18) }}<h2>What else was tried</h2></div>
+            <div class="table-wrap">
+                <table class="table">
+                    <thead><tr><th>Variant</th><th class="table__num">Seeds</th>
+                        <th class="table__num">Image</th><th class="table__num">Fusion</th>
+                        <th class="table__num">Ensemble</th></tr></thead>
+                    <tbody>
+                        {% for name, variant in m.experiments.items() %}
+                        <tr>
+                            <td class="mono tiny">{{ name }}</td>
+                            <td class="table__num">{{ variant.seeds }}</td>
+                            <td class="table__num">
+                                {%- if variant.image %}{{ '%.2f' % variant.image.mean }}
+                                <span class="tiny muted">&plusmn;{{ '%.2f' % variant.image.std }}</span>
+                                {%- else %}--{% endif %}
+                            </td>
+                            <td class="table__num">
+                                {%- if variant.fusion %}{{ '%.2f' % variant.fusion.mean }}
+                                <span class="tiny muted">&plusmn;{{ '%.2f' % variant.fusion.std }}</span>
+                                {%- else %}--{% endif %}
+                            </td>
+                            <td class="table__num strong">{{ '%.2f' % variant.ensemble if variant.ensemble is not none else '--' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="card__footer">
+                <p class="card__hint">
+                    Mean leave-one-day-out MAE in days, over several training seeds, from
+                    <span class="mono">results/experiments.json</span>. Head training is
+                    stochastic and the spread (&plusmn;) is as large as the gap between whole
+                    architectures &mdash; which is why the served model averages several heads,
+                    and why every variant here was scored over more than one run.
+                </p>
+            </div>
+        </section>
+        {% endif %}
+    </div>
+    {% endif %}
+
     {% if rsl.feature_names %}
     <section class="card">
         <div class="card__header">{{ icon('sliders', 18) }}<h2>The 27 sensor features</h2></div>
