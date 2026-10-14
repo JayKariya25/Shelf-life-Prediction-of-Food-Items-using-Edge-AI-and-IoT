@@ -863,6 +863,19 @@ class DeveloperConsoleWithTheModel(AppTestCase):
         self.assertNotIn("1, 27", body)
         self.assertNotIn("Temperature_Gas_Interaction", body)
 
+    def test_model_card_shows_the_evidence_for_its_own_claims(self):
+        """The card asserts the served model is best; the bundle's evidence must be on it."""
+        body = self.client.get("/admin/model").get_data(as_text=True)
+        # the 1-NN lookup probe: how much of the within-session score is retrieval
+        self.assertIn("lookup", body.lower())
+        self.assertIn("0.081", body)
+        self.assertIn("No within-day split measures generalisation", body)
+        # the branch-by-branch within-session comparison
+        self.assertIn("Each branch, within a session", body)
+        # the multi-seed variant study
+        self.assertIn("What else was tried", body)
+        self.assertIn("sensor_dropout", body)
+
     def test_playground_counts_readings_and_says_they_are_not_an_input(self):
         first = self.playground().get_json()["data"]
         second = self.playground(temperature="28.6").get_json()["data"]
