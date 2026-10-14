@@ -179,6 +179,33 @@ baseline ignores it rather than guess a ppm scale, and the served image ensemble
 sensor input at all. Devices still send it as `gas_ppm`, in the same units the training
 rig recorded: it is stored, charted, and read by the fusion export if you switch to it.
 
+### Where the temperature on the page comes from
+
+Three sources, in preference order. The page always says which one it is showing, and a
+real measurement is never labelled as simulated:
+
+| Mode | What it is | Shown as |
+|---|---|---|
+| `live` | a Raspberry Pi on the shelf reported within `DEVICE_ONLINE_SECONDS` | **Live sensor** |
+| `observed` | the real current conditions for `WEATHER_PLACE`, from Open-Meteo | **Local weather · _place_** |
+| `simulated` | `sensors.synthesise` — a deterministic model of a Bengaluru kitchen | **Simulated data** |
+
+`SENSOR_SOURCE=auto` (the default) walks down that list. `observed` exists because the
+simulator is a *model*, not a measurement: on a hot afternoon it sat several degrees from
+the real thing, so with no hardware attached the pages were showing a plausible number
+rather than the actual environment. It needs no API key, uses only the standard library,
+caches one fetch per `WEATHER_TTL_SECONDS` across all request threads, and times out in
+`WEATHER_TIMEOUT_SECONDS` — a failure falls back to the simulator, labelled, and is shown
+as *Unreachable* on the developer console's system page. Set `WEATHER_ENABLED=false` to
+keep the machine fully offline.
+
+**What `observed` is not.** It is outdoor air for a whole locality, measured nowhere near
+the food. It is a reasonable stand-in for fruit on a counter in an unconditioned room and
+the wrong number for a closed fridge — so **enclosed storage keeps its nominal profile**
+(`services.STORAGE_PROFILES`: fridge 4 °C, freezer −18 °C) and never uses it. A weather
+station also has no gas channel, so `gas_ppm` stays null rather than being invented. The
+only way to get the real temperature *beside the food* is to link a device to the item.
+
 Reference shelf-life and Q10 values come from standard postharvest storage
 guidance and live in `FOOD_TYPE_SEED` in [`shelflife/db.py`](shelflife/db.py).
 They are order-of-magnitude reference values, tunable per produce type, and they

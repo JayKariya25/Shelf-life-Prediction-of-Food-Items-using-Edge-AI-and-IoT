@@ -18,6 +18,7 @@ notebooks/
   01_sensor_model.ipynb           sensor branch, walkthrough with plots
   02_image_model.ipynb            image branch, walkthrough with plots
   03_fusion_and_deployment.ipynb  fusion, TFLite export, generalisation checks
+  04_image_ensemble.ipynb         the SERVED model: an ensemble of image heads
 scripts/
   common.py                       paths, feature sets, splits, metrics
   datasets.py                     loading helpers

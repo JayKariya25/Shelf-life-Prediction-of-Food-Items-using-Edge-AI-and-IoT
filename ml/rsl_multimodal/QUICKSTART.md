@@ -120,6 +120,11 @@ Then open, in order:
 1. `notebooks/01_sensor_model.ipynb` — sensor branch, and which columns are excluded and why
 2. `notebooks/02_image_model.ipynb` — image branch, sample frames, worst errors
 3. `notebooks/03_fusion_and_deployment.ipynb` — fusion, TFLite, generalisation
+4. `notebooks/04_image_ensemble.ipynb` — **the model the website actually serves**, and
+   why the sensor input was dropped
+
+Regenerate any of them with `python scripts/build_notebooks.py [--only 03 04]`; they ship
+with their outputs, so the numbers in them are the ones that actually ran.
 
 They already contain all their outputs, so you can read them without running anything.
 "Restart & Run All" re-executes them (~3 minutes total).
